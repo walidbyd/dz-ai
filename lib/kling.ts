@@ -28,7 +28,11 @@ function getKlingAuthToken(): string {
 }
 
 /**
- * Initiates an Image-to-Video generation task on Kling 2.6.
+ * Initiates an Image-to-Video generation task on Kling 2.6:
+ * - Model: kling-v2-6
+ * - Mode: std (Standard)
+ * - Sound: off (Silent video, no voice/SFX generated)
+ * - Format: 9:16 Vertical Reel
  */
 export async function generateKlingUGCVideo(
   prompt: string,
@@ -44,10 +48,11 @@ export async function generateKlingUGCVideo(
     },
     body: JSON.stringify({
       model_name: "kling-v2-6",
+      mode: "std",
+      sound: "off",
       image: imageUrl,
       prompt: prompt,
       cfg_scale: 0.5,
-      mode: "std",
       duration: "5",
       aspect_ratio: "9:16",
     }),
