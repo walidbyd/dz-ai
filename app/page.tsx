@@ -1,17 +1,18 @@
 "use client";
 
-import { useState, useRef } from "react";
-import { Play, CheckCircle2, Sparkles, ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { Play, Pause, Volume2, VolumeX, CheckCircle2, Sparkles, ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
 
 export default function LandingPage() {
   const [activeVideoIndex, setActiveVideoIndex] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [isMuted, setIsMuted] = useState(true);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  // Touch & Mouse Swipe Handlers
+  // Touch & Swipe state
   const touchStartX = useRef<number | null>(null);
   const touchEndX = useRef<number | null>(null);
-  const isDragging = useRef<boolean>(false);
 
   const sampleVideos = [
     {
@@ -28,7 +29,7 @@ export default function LandingPage() {
       duration: "00:10",
       hook: "الساعة الذكية لي كامل راهم يحوسو عليها مع توصيل مجاني!",
       creator: "صوت وليد (أفاتار)",
-      videoUrl: "/demo-2.mp4",
+      videoUrl: "/demo-1.mp4", // Fallback to demo-1 until you upload demo-2
     },
     {
       title: "برغر وماكلة خفيفة",
@@ -36,64 +37,63 @@ export default function LandingPage() {
       duration: "00:10",
       hook: "أبن برغر في العاصمة، جرب وما تندمش!",
       creator: "فيديو السلعة (Voiceover B-roll)",
-      videoUrl: "/demo-3.mp4",
+      videoUrl: "/demo-1.mp4", // Fallback to demo-1 until you upload demo-3
     },
   ];
 
-  const handleNextVideo = () => {
+  // Force mobile browsers (iOS & Android) to honor muted autoplay on change
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.defaultMuted = true;
+      videoRef.current.muted = isMuted;
+      videoRef.current
+        .play()
+        .then(() => setIsPlaying(true))
+        .catch(() => setIsPlaying(false));
+    }
+  }, [activeVideoIndex, isMuted]);
+
+  const togglePlay = () => {
+    if (!videoRef.current) return;
+    if (videoRef.current.paused) {
+      videoRef.current.play();
+      setIsPlaying(true);
+    } else {
+      videoRef.current.pause();
+      setIsPlaying(false);
+    }
+  };
+
+  const toggleMute = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!videoRef.current) return;
+    videoRef.current.muted = !videoRef.current.muted;
+    setIsMuted(videoRef.current.muted);
+  };
+
+  const handleNextVideo = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
     setActiveVideoIndex((prev) => (prev + 1) % sampleVideos.length);
   };
 
-  const handlePrevVideo = () => {
+  const handlePrevVideo = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
     setActiveVideoIndex((prev) => (prev - 1 + sampleVideos.length) % sampleVideos.length);
   };
 
-  // Swipe detection threshold
+  // Swipe handling
   const minSwipeDistance = 45;
-
   const onTouchStart = (e: React.TouchEvent) => {
-    touchEndX.current = null;
     touchStartX.current = e.targetTouches[0].clientX;
   };
-
   const onTouchMove = (e: React.TouchEvent) => {
     touchEndX.current = e.targetTouches[0].clientX;
   };
-
   const onTouchEnd = () => {
     if (!touchStartX.current || !touchEndX.current) return;
     const distance = touchStartX.current - touchEndX.current;
-    if (distance > minSwipeDistance) {
-      // Swiped Left
-      handleNextVideo();
-    } else if (distance < -minSwipeDistance) {
-      // Swiped Right
-      handlePrevVideo();
-    }
-  };
-
-  // Desktop Mouse Drag Support
-  const onMouseDown = (e: React.MouseEvent) => {
-    isDragging.current = true;
-    touchEndX.current = null;
-    touchStartX.current = e.clientX;
-  };
-
-  const onMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging.current) return;
-    touchEndX.current = e.clientX;
-  };
-
-  const onMouseUp = () => {
-    if (!isDragging.current) return;
-    isDragging.current = false;
-    if (!touchStartX.current || !touchEndX.current) return;
-    const distance = touchStartX.current - touchEndX.current;
-    if (distance > minSwipeDistance) {
-      handleNextVideo();
-    } else if (distance < -minSwipeDistance) {
-      handlePrevVideo();
-    }
+    if (distance > minSwipeDistance) handleNextVideo();
+    if (distance < -minSwipeDistance) handlePrevVideo();
   };
 
   const steps = [
@@ -165,14 +165,14 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* SHOWCASE SECTION WITH SWIPABLE PHONE */}
+        {/* SHOWCASE SECTION WITH MOBILE OPTIMIZED PLAYER */}
         <section className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center bg-white border border-slate-200 rounded-3xl p-4 md:p-8 shadow-sm">
           <div className="space-y-4">
             <h2 className="text-2xl md:text-3xl font-black text-slate-900">
               أمثلة على الفيديوهات لي تقدر تخدمها
             </h2>
             <p className="text-sm text-slate-500">
-              فيديوهات عمودية (9:16) واجدة مباشرة للنشر. اضغط على الفئات أو اسحب الهاتف (Swipe) للتنقل بين النماذج:
+              فيديوهات عمودية (9:16) واجدة مباشرة للنشر. اضغط على الفئات أو المس الشاشة لتشغيل وإيقاف الصوت:
             </p>
             <div className="flex flex-col gap-2 pt-2">
               {sampleVideos.map((vid, idx) => (
@@ -198,45 +198,53 @@ export default function LandingPage() {
             </div>
           </div>
 
-          {/* SWIPE-ENABLED PHONE MOCKUP */}
+          {/* TAP-TO-PLAY PHONE MOCKUP */}
           <div className="flex flex-col items-center gap-2">
             <div
+              onClick={togglePlay}
               onTouchStart={onTouchStart}
               onTouchMove={onTouchMove}
               onTouchEnd={onTouchEnd}
-              onMouseDown={onMouseDown}
-              onMouseMove={onMouseMove}
-              onMouseUp={onMouseUp}
-              onMouseLeave={onMouseUp}
-              className="relative aspect-[9/16] w-full max-w-[280px] mx-auto rounded-[38px] overflow-hidden border-[5px] border-slate-900 bg-slate-950 shadow-2xl flex flex-col justify-between p-3 select-none cursor-grab active:cursor-grabbing"
+              className="relative aspect-[9/16] w-full max-w-[280px] mx-auto rounded-[38px] overflow-hidden border-[5px] border-slate-900 bg-slate-950 shadow-2xl flex flex-col justify-between p-3 select-none cursor-pointer"
             >
-              {/* Real Video Element */}
+              {/* Native HTML5 Video configured for mobile auto-play */}
               <video
                 ref={videoRef}
-                key={sampleVideos[activeVideoIndex].videoUrl}
+                key={sampleVideos[activeVideoIndex].videoUrl + activeVideoIndex}
                 src={sampleVideos[activeVideoIndex].videoUrl}
-                controls
                 playsInline
-                loop
                 autoPlay
-                muted
-                className="absolute inset-0 w-full h-full object-cover z-0 pointer-events-auto"
+                loop
+                muted={isMuted}
+                preload="auto"
+                className="absolute inset-0 w-full h-full object-cover z-0"
               />
 
-              {/* Dynamic Island Notch */}
+              {/* Dynamic Island */}
               <div className="absolute top-2.5 left-1/2 -translate-x-1/2 w-16 h-3 bg-slate-900 rounded-full z-30 pointer-events-none" />
 
-              {/* Top Badges */}
-              <div className="relative z-10 flex justify-between items-center text-[10px] text-white/90 font-mono pointer-events-none mt-1">
-                <span className="bg-black/50 backdrop-blur-md px-2.5 py-0.5 rounded-full font-bold">
+              {/* Top Controls: Badge + Mute Button */}
+              <div className="relative z-20 flex justify-between items-center text-[10px] text-white/90 font-mono mt-1">
+                <span className="bg-black/60 backdrop-blur-md px-2.5 py-0.5 rounded-full font-bold">
                   {sampleVideos[activeVideoIndex].duration}
                 </span>
-                <span className="bg-emerald-600 text-white font-bold px-2.5 py-0.5 rounded-full shadow-sm">
-                  UGC Ad
-                </span>
+                
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={toggleMute}
+                    className="p-1.5 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md text-white transition-all cursor-pointer"
+                    aria-label="Toggle Sound"
+                  >
+                    {isMuted ? <VolumeX className="w-3.5 h-3.5 text-red-400" /> : <Volume2 className="w-3.5 h-3.5 text-emerald-400" />}
+                  </button>
+                  <span className="bg-emerald-600 text-white font-bold px-2 py-0.5 rounded-full shadow-sm text-[9px]">
+                    UGC Ad
+                  </span>
+                </div>
               </div>
 
-              {/* Side Floating Swipe Arrows */}
+              {/* Side Floating Swipe Navigation */}
               <button
                 type="button"
                 onClick={handlePrevVideo}
@@ -254,10 +262,17 @@ export default function LandingPage() {
                 <ChevronRight className="w-4 h-4" />
               </button>
 
-              <div className="flex-1 pointer-events-none" />
+              {/* Center Play indicator overlay when paused */}
+              {!isPlaying && (
+                <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/30 backdrop-blur-[1px]">
+                  <div className="w-14 h-14 rounded-full bg-emerald-600/90 text-white flex items-center justify-center shadow-lg">
+                    <Play className="w-6 h-6 fill-white ml-0.5" />
+                  </div>
+                </div>
+              )}
 
               {/* Bottom Subtitle Caption */}
-              <div className="relative z-10 bg-slate-950/85 backdrop-blur-md p-2.5 rounded-2xl border border-white/10 text-center pointer-events-none mb-1">
+              <div className="relative z-20 bg-slate-950/85 backdrop-blur-md p-2.5 rounded-2xl border border-white/10 text-center mb-1">
                 <span className="text-[9px] font-bold text-emerald-400 block mb-0.5 font-mono uppercase">
                   السكريبت (الدارجة):
                 </span>
@@ -281,7 +296,7 @@ export default function LandingPage() {
                 />
               ))}
             </div>
-            <span className="text-[10px] text-slate-400 font-medium">اسحب يميناً أو يساراً للتغيير 📱</span>
+            <span className="text-[10px] text-slate-400 font-medium">اضغط للشاشة لتشغيل/إيقاف الفيديو والصوت 🔊</span>
           </div>
         </section>
 
