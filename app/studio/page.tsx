@@ -27,8 +27,12 @@ import {
   Upload,
   Square,
   Radio,
+  Plus,
+  Trash2,
+  ShoppingBag,
 } from "lucide-react";
 import Link from "next/link";
+import { BaridiMobModal } from "@/components/BaridiMobModal";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -47,12 +51,15 @@ export default function StudioPage() {
   // Studio UI states
   const [activeTab, setActiveTab] = useState<"preview" | "script" | "settings">("settings");
 
-  // Input states
-  const [productImage, setProductImage] = useState<string | null>(null);
+  // Multi-Image & Model states (Horizontal Grid up to 4 images)
+  const [productImages, setProductImages] = useState<string[]>([]);
   const [avatarImage, setAvatarImage] = useState<string | null>(null);
+  const [videoMode, setVideoMode] = useState<"LIPSYNC" | "VOICEOVER">("LIPSYNC");
+
+  // Voice Selection State
+  const [voiceCategory, setVoiceCategory] = useState<"ai" | "custom">("ai");
   const [voice, setVoice] = useState<"sarah" | "walid" | "custom">("sarah");
   const [customAudioName, setCustomAudioName] = useState<string | null>(null);
-  const [videoMode, setVideoMode] = useState<"LIPSYNC" | "VOICEOVER">("LIPSYNC");
 
   // Microphone Live Recording states
   const [isRecordingMic, setIsRecordingMic] = useState(false);
@@ -72,7 +79,8 @@ export default function StudioPage() {
     sfxPrompt?: string;
   } | null>(null);
 
-  // Unified Mixed Audio State
+  // Audio Preview Limits & State (Capped at 2)
+  const [audioPreviewCount, setAudioPreviewCount] = useState<number>(0);
   const [previewAudioUrl, setPreviewAudioUrl] = useState<string | null>(null);
   const [previewSfxUrl, setPreviewSfxUrl] = useState<string | null>(null);
   const [loadingAudio, setLoadingAudio] = useState(false);
@@ -81,11 +89,12 @@ export default function StudioPage() {
   const voiceAudioRef = useRef<HTMLAudioElement | null>(null);
   const sfxAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Rendering & Polling
+  // Rendering, Polling & Paywall Modal
   const [isRendering, setIsRendering] = useState(false);
   const [renderStatus, setRenderStatus] = useState<string>("جاري تحضير الفيديو...");
   const [finalVideoUrl, setFinalVideoUrl] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [showPaywallModal, setShowPaywallModal] = useState<boolean>(false);
 
   // Fetch real user session & credits on initial mount
   useEffect(() => {
@@ -119,11 +128,35 @@ export default function StudioPage() {
     fetchUserProfile();
   }, []);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, setter: (val: string) => void) => {
+  // Multi-image file uploader (Max 4)
+  const handleProductImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    const remainingSlots = 4 - productImages.length;
+    const filesToProcess = Array.from(files).slice(0, remainingSlots);
+
+    filesToProcess.forEach((file) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setProductImages((prev) => {
+          if (prev.length >= 4) return prev;
+          return [...prev, reader.result as string];
+        });
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const removeProductImage = (index: number) => {
+    setProductImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = () => setter(reader.result as string);
+      reader.onloadend = () => setAvatarImage(reader.result as string);
       reader.readAsDataURL(file);
     }
   };
@@ -196,8 +229,8 @@ export default function StudioPage() {
   // Generate / Chat with Gemini to adjust the script
   const handleGenerateScript = async (customPrompt?: string) => {
     const textToSend = (customPrompt || inputPrompt).trim();
-    if (!productImage && chatMessages.length === 0) {
-      setErrorMsg("يرجى رفع صورة السلعة أولاً.");
+    if (productImages.length === 0 && chatMessages.length === 0) {
+      setErrorMsg("يرجى رفع صورة واحدة على الأقل للمنتج.");
       setActiveTab("settings");
       return;
     }
@@ -217,7 +250,7 @@ export default function StudioPage() {
           messages: newMessages,
           voice: voice === "custom" ? "walid" : voice,
           videoMode,
-          productImage,
+          productImage: productImages[0],
           avatarImage,
         }),
       });
@@ -247,9 +280,14 @@ export default function StudioPage() {
     }
   };
 
-  // Generate Mixed Audio (Voice + SFX)
+  // Generate Mixed Audio (Voice + SFX) - Enforcing 2 Previews Limit
   const handleGenerateAudio = async () => {
+    if (audioPreviewCount >= 2) {
+      setErrorMsg("لقد استنفدت الحد الأقصى للمعاينة الصوتية (2/2). يمكنك الآن الانتقال لتوليد الفيديو.");
+      return;
+    }
     if (!scriptData?.script && voice !== "custom") return;
+
     setLoadingAudio(true);
     setErrorMsg(null);
 
@@ -272,8 +310,8 @@ export default function StudioPage() {
         setPreviewAudioUrl(data.audioUrl);
       }
       setPreviewSfxUrl(data.sfxUrl);
+      setAudioPreviewCount((prev) => prev + 1);
 
-      // Auto-play the complete mix immediately upon generation
       setTimeout(() => {
         playMixedAudio();
       }, 150);
@@ -284,7 +322,6 @@ export default function StudioPage() {
     }
   };
 
-  // Play/Pause the Complete Audio Mix
   const playMixedAudio = () => {
     if (!voiceAudioRef.current) return;
 
@@ -307,20 +344,22 @@ export default function StudioPage() {
     }
   };
 
-  // Video Rendering using Kling + Supabase Storage + Polling
+  // Video Rendering using Kling - Triggers Paywall if credits <= 0
   const handleRenderFinalVideo = async () => {
     if (!previewAudioUrl) {
       setErrorMsg("يرجى اختيار، تسجيل أو رفع الصوت أولاً!");
       return;
     }
+
+    // Paywall trigger: No credits -> Prompt commercial offer modal
     if (credits <= 0) {
-      setErrorMsg("رصيد الكريدي غير كافٍ. يرجى شحن الحساب.");
+      setShowPaywallModal(true);
       return;
     }
 
     setIsRendering(true);
     setErrorMsg(null);
-    setRenderStatus("جارٍ رفع الملفات الصوتية وإطلاق المهمة...");
+    setRenderStatus("جارٍ رفع الملفات وإطلاق مهمة الفيديو...");
 
     try {
       const res = await fetch("/api/render-video", {
@@ -330,7 +369,7 @@ export default function StudioPage() {
           audioBase64: previewAudioUrl,
           visualPromptEn:
             scriptData?.visualPromptEn || "Dynamic Algerian UGC creator product showcase, 9:16 vertical video",
-          productImageUrl: productImage,
+          productImageUrl: productImages[0],
           avatarImageUrl: avatarImage,
           videoMode,
         }),
@@ -372,7 +411,7 @@ export default function StudioPage() {
 
   return (
     <div dir="rtl" className="min-h-screen bg-[#f8fafc] text-slate-800 font-sans antialiased flex flex-col pb-28 lg:pb-8">
-      {/* Hidden Audio Elements for Complete Mix */}
+      {/* Hidden Audio Elements */}
       {previewAudioUrl && (
         <audio
           ref={voiceAudioRef}
@@ -383,26 +422,23 @@ export default function StudioPage() {
           }}
         />
       )}
-      {previewSfxUrl && (
-        <audio
-          ref={sfxAudioRef}
-          src={previewSfxUrl}
-        />
-      )}
+      {previewSfxUrl && <audio ref={sfxAudioRef} src={previewSfxUrl} />}
 
-      {/* Mobile-Optimized Header */}
+      {/* Header */}
       <header className="sticky top-0 z-40 h-14 bg-white/95 backdrop-blur-md border-b border-slate-200 px-3 md:px-8 flex items-center justify-between shadow-xs">
         <div className="flex items-center gap-2">
           <Link href="/" className="p-2 hover:bg-slate-100 active:bg-slate-200 rounded-lg text-slate-600 transition-colors">
             <ArrowRight className="w-5 h-5" />
           </Link>
-          <div className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full text-emerald-700 text-xs font-bold">
+          <button
+            onClick={() => setShowPaywallModal(true)}
+            className="flex items-center gap-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded-full text-emerald-700 text-xs font-bold transition-colors cursor-pointer"
+          >
             <Zap className="w-3.5 h-3.5 fill-emerald-600 text-emerald-600" />
             <span>{loadingUser ? "..." : `${credits} كريدي`}</span>
-          </div>
+          </button>
         </div>
 
-        {/* Dynamic Authenticated User Display */}
         <div className="flex items-center gap-2">
           <div className="text-right">
             <h1 className="text-xs font-bold text-slate-900 leading-none">
@@ -411,11 +447,7 @@ export default function StudioPage() {
             <span className="text-[10px] text-slate-400 font-medium">UGC Reels 9:16</span>
           </div>
           {userAvatar ? (
-            <img
-              src={userAvatar}
-              alt="Profile"
-              className="w-8 h-8 rounded-full border border-emerald-500 object-cover shadow-xs"
-            />
+            <img src={userAvatar} alt="Profile" className="w-8 h-8 rounded-full border border-emerald-500 object-cover shadow-xs" />
           ) : (
             <div className="w-8 h-8 rounded-full bg-emerald-600 text-white font-black text-xs flex items-center justify-center shadow-xs">
               DZ
@@ -432,104 +464,129 @@ export default function StudioPage() {
         </div>
       )}
 
-      {/* Workspace */}
+      {/* Main Workspace */}
       <main className="flex-1 max-w-[1440px] w-full mx-auto p-3 sm:p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 items-start">
         
         {/* 1. LEFT COLUMN: Setup & Uploads */}
-        <section
-          className={`lg:col-span-3 space-y-3.5 ${
-            activeTab === "settings" ? "block" : "hidden lg:block"
-          }`}
-        >
-          {/* Voice Actor Selector + Live Mic Record + File Upload */}
+        <section className={`lg:col-span-3 space-y-3.5 ${activeTab === "settings" ? "block" : "hidden lg:block"}`}>
+          
+          {/* Voice Hierarchy: 1) Sarah / Walid, 2) Your Voice (Expands to Mic / Upload) */}
           <div className="bg-white rounded-2xl border border-slate-200 p-3.5 shadow-xs space-y-3">
-            <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-              <Mic className="w-4 h-4 text-emerald-600" />
-              المعلق الصوتي (Darija V3 أو صوتك):
+            <label className="text-xs font-bold text-slate-800 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Mic className="w-4 h-4 text-emerald-600" />
+                المعلق الصوتي:
+              </span>
+              <span className="text-[10px] text-slate-400 font-medium">دارجة عاصمية V3</span>
             </label>
 
+            {/* Top 2 AI Voices */}
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
-                onClick={() => setVoice("sarah")}
+                onClick={() => {
+                  setVoiceCategory("ai");
+                  setVoice("sarah");
+                }}
                 className={`p-2.5 rounded-xl border text-right transition-all flex items-center justify-between ${
-                  voice === "sarah" ? "border-emerald-500 bg-emerald-50/60 ring-1 ring-emerald-500" : "border-slate-200 bg-white active:bg-slate-50"
+                  voiceCategory === "ai" && voice === "sarah"
+                    ? "border-emerald-500 bg-emerald-50/60 ring-1 ring-emerald-500"
+                    : "border-slate-200 bg-white active:bg-slate-50"
                 }`}
               >
                 <div>
                   <div className="text-xs font-bold text-slate-900">سارة (Sarah)</div>
                   <div className="text-[10px] text-slate-500">صوت أنثوي حيوي</div>
                 </div>
-                {voice === "sarah" && <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />}
+                {voiceCategory === "ai" && voice === "sarah" && (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                )}
               </button>
 
               <button
                 type="button"
-                onClick={() => setVoice("walid")}
+                onClick={() => {
+                  setVoiceCategory("ai");
+                  setVoice("walid");
+                }}
                 className={`p-2.5 rounded-xl border text-right transition-all flex items-center justify-between ${
-                  voice === "walid" ? "border-emerald-500 bg-emerald-50/60 ring-1 ring-emerald-500" : "border-slate-200 bg-white active:bg-slate-50"
+                  voiceCategory === "ai" && voice === "walid"
+                    ? "border-emerald-500 bg-emerald-50/60 ring-1 ring-emerald-500"
+                    : "border-slate-200 bg-white active:bg-slate-50"
                 }`}
               >
                 <div>
                   <div className="text-xs font-bold text-slate-900">وليد (Walid)</div>
                   <div className="text-[10px] text-slate-500">صوت رجالي إعلاني</div>
                 </div>
-                {voice === "walid" && <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />}
+                {voiceCategory === "ai" && voice === "walid" && (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                )}
               </button>
             </div>
 
-            {/* Custom Voice Options: Live Mic or File Upload */}
-            <div className={`p-3 rounded-xl border transition-all ${
-              voice === "custom" ? "border-emerald-500 bg-emerald-50/40 ring-1 ring-emerald-500" : "border-slate-200 bg-slate-50/70"
-            }`}>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                  <Radio className="w-3.5 h-3.5 text-emerald-600" />
-                  صوت خاص بك (تسجيل أو رفع):
-                </span>
-                {voice === "custom" && <CheckCircle2 className="w-4 h-4 text-emerald-600" />}
-              </div>
-
-              {/* Live Mic Button */}
-              <div className="space-y-2">
-                {!isRecordingMic ? (
-                  <button
-                    type="button"
-                    onClick={startRecording}
-                    className="w-full min-h-[44px] py-2 px-3 bg-red-600 hover:bg-red-700 active:scale-[0.99] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-xs"
-                  >
-                    <Mic className="w-4 h-4 animate-pulse" />
-                    <span>تكلم الآن (تسجيل مباشر بالميكروفون)</span>
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={stopRecording}
-                    className="w-full min-h-[44px] py-2 px-3 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all animate-pulse shadow-md"
-                  >
-                    <Square className="w-3.5 h-3.5 fill-red-500 text-red-500" />
-                    <span>إيقاف وحفظ الصوت ({recordDuration} ثانية)</span>
-                  </button>
-                )}
-
-                {/* File Upload Alternative */}
-                <label className="w-full min-h-[40px] py-2 px-3 bg-white border border-slate-300 hover:bg-slate-50 active:bg-slate-100 rounded-xl text-xs font-semibold text-slate-700 flex items-center justify-center gap-1.5 cursor-pointer transition-all">
-                  <Upload className="w-3.5 h-3.5 text-slate-500" />
-                  <span>أو ارفع ملفاً صوتياً جاهزاً</span>
-                  <input
-                    type="file"
-                    accept="audio/*"
-                    className="hidden"
-                    onChange={handleCustomAudioUpload}
-                  />
-                </label>
-
-                {customAudioName && (
-                  <div className="text-[10px] text-emerald-700 font-bold bg-white p-2 rounded-lg border border-emerald-200 text-center truncate shadow-2xs">
-                    ✅ {customAudioName}
+            {/* Dedicated "Your Voice" expandable toggle */}
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setVoiceCategory("custom");
+                  setVoice("custom");
+                }}
+                className={`w-full p-2.5 rounded-xl border text-right transition-all flex items-center justify-between ${
+                  voiceCategory === "custom"
+                    ? "border-emerald-500 bg-emerald-50/50 ring-1 ring-emerald-500"
+                    : "border-slate-200 bg-slate-50/70 hover:bg-slate-100"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-700">
+                    <Radio className="w-4 h-4" />
                   </div>
-                )}
-              </div>
+                  <div>
+                    <div className="text-xs font-bold text-slate-900">صوتك الخاص (تسجيل أو رفع)</div>
+                    <div className="text-[10px] text-slate-500">استعمل نبرتك الحقيقية في الفيديو</div>
+                  </div>
+                </div>
+                {voiceCategory === "custom" && <CheckCircle2 className="w-4 h-4 text-emerald-600" />}
+              </button>
+
+              {/* Sub-options for custom voice: Record OR Upload */}
+              {voiceCategory === "custom" && (
+                <div className="mt-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                  {!isRecordingMic ? (
+                    <button
+                      type="button"
+                      onClick={startRecording}
+                      className="w-full min-h-[40px] py-2 px-3 bg-red-600 hover:bg-red-700 active:scale-[0.99] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-xs"
+                    >
+                      <Mic className="w-3.5 h-3.5 animate-pulse" />
+                      <span>تسجيل مباشر بالميكروفون</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={stopRecording}
+                      className="w-full min-h-[40px] py-2 px-3 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all animate-pulse shadow-md"
+                    >
+                      <Square className="w-3 h-3 fill-red-500 text-red-500" />
+                      <span>إيقاف وحفظ ({recordDuration} ثانية)</span>
+                    </button>
+                  )}
+
+                  <label className="w-full min-h-[38px] py-2 px-3 bg-white border border-slate-300 hover:bg-slate-50 active:bg-slate-100 rounded-xl text-xs font-semibold text-slate-700 flex items-center justify-center gap-1.5 cursor-pointer transition-all">
+                    <Upload className="w-3.5 h-3.5 text-slate-500" />
+                    <span>رفع ملف صوتي جاهز</span>
+                    <input type="file" accept="audio/*" className="hidden" onChange={handleCustomAudioUpload} />
+                  </label>
+
+                  {customAudioName && (
+                    <div className="text-[10px] text-emerald-700 font-bold bg-white p-2 rounded-lg border border-emerald-200 text-center truncate">
+                      ✅ {customAudioName}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -543,7 +600,7 @@ export default function StudioPage() {
               <button
                 type="button"
                 onClick={() => setVideoMode("LIPSYNC")}
-                className={`min-h-[44px] p-2 rounded-xl border text-right transition-all flex items-center justify-center ${
+                className={`min-h-[40px] p-2 rounded-xl border text-right transition-all flex items-center justify-center ${
                   videoMode === "LIPSYNC" ? "border-emerald-500 bg-emerald-50/60 ring-1 ring-emerald-500" : "border-slate-200 active:bg-slate-50"
                 }`}
               >
@@ -556,7 +613,7 @@ export default function StudioPage() {
               <button
                 type="button"
                 onClick={() => setVideoMode("VOICEOVER")}
-                className={`min-h-[44px] p-2 rounded-xl border text-right transition-all flex items-center justify-center ${
+                className={`min-h-[40px] p-2 rounded-xl border text-right transition-all flex items-center justify-center ${
                   videoMode === "VOICEOVER" ? "border-emerald-500 bg-emerald-50/60 ring-1 ring-emerald-500" : "border-slate-200 active:bg-slate-50"
                 }`}
               >
@@ -568,53 +625,64 @@ export default function StudioPage() {
             </div>
           </div>
 
-          {/* Product & Model Uploads */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-2.5">
-            <div className="bg-white rounded-2xl border border-slate-200 p-3 shadow-xs space-y-1.5">
-              <span className="text-[11px] font-bold text-slate-800 block">1. صورة السلعة (إجباري):</span>
-              <label className="relative block w-full aspect-video rounded-xl overflow-hidden border-2 border-dashed border-slate-300 bg-slate-50 cursor-pointer active:border-emerald-500 hover:border-emerald-500 transition-colors">
-                {productImage ? (
-                  <img src={productImage} alt="Product" className="w-full h-full object-cover" />
-                ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 p-2">
-                    <UploadCloud className="w-6 h-6 text-emerald-600 mb-1" />
-                    <span className="text-xs font-bold text-slate-700">اضغط لرفع صورة السلعة</span>
-                    <span className="text-[10px] text-slate-400">JPG أو PNG</span>
-                  </div>
-                )}
-                <input type="file" accept="image/*" className="hidden" onChange={(e) => handleFileUpload(e, setProductImage)} />
-              </label>
+          {/* Compact Horizontal Grid for Product Images (Up to 4) */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-3.5 shadow-xs space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-800 flex items-center gap-1">
+                <ShoppingBag className="w-3.5 h-3.5 text-emerald-600" />
+                صور السلعة ({productImages.length}/4):
+              </span>
+              <span className="text-[10px] text-slate-400">اسحب أو أضف</span>
             </div>
 
-            <div className="bg-white rounded-2xl border border-slate-200 p-3 shadow-xs space-y-1.5">
-              <span className="text-[11px] font-bold text-slate-800 block">2. صورة الموديل (اختياري):</span>
-              <label className="relative block w-full aspect-video rounded-xl overflow-hidden border-2 border-dashed border-slate-300 bg-slate-50 cursor-pointer active:border-emerald-500 hover:border-emerald-500 transition-colors">
-                {avatarImage ? (
-                  <img src={avatarImage} alt="Model" className="w-full h-full object-cover" />
-                ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 p-2">
-                    <UploadCloud className="w-6 h-6 text-emerald-600 mb-1" />
-                    <span className="text-xs font-bold text-slate-700">اضغط لرفع صورة الموديل</span>
-                    <span className="text-[10px] text-slate-400">صورة شخصية للـ Lip-Sync</span>
-                  </div>
-                )}
-                <input type="file" accept="image/*" className="hidden" onChange={(e) => handleFileUpload(e, setAvatarImage)} />
-              </label>
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+              {productImages.map((img, idx) => (
+                <div key={idx} className="relative w-16 h-16 shrink-0 rounded-xl overflow-hidden border border-slate-200 group">
+                  <img src={img} alt={`Product ${idx + 1}`} className="w-full h-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => removeProductImage(idx)}
+                    className="absolute inset-0 bg-black/50 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                  </button>
+                </div>
+              ))}
+
+              {productImages.length < 4 && (
+                <label className="w-16 h-16 shrink-0 rounded-xl border-2 border-dashed border-slate-300 hover:border-emerald-500 bg-slate-50 flex flex-col items-center justify-center cursor-pointer transition-colors text-slate-400 hover:text-emerald-600">
+                  <Plus className="w-5 h-5" />
+                  <span className="text-[9px] font-bold mt-0.5">إضافة</span>
+                  <input type="file" accept="image/*" multiple className="hidden" onChange={handleProductImageUpload} />
+                </label>
+              )}
             </div>
+          </div>
+
+          {/* Dedicated Model/Avatar Image Slot */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-3 shadow-xs flex items-center justify-between">
+            <div>
+              <div className="text-xs font-bold text-slate-800">صورة الموديل (Lip-Sync):</div>
+              <div className="text-[10px] text-slate-400">وجه الموديل للتحدث بالفيديو</div>
+            </div>
+
+            <label className="w-14 h-14 rounded-xl overflow-hidden border-2 border-dashed border-slate-300 bg-slate-50 flex items-center justify-center cursor-pointer hover:border-emerald-500 transition-colors shrink-0">
+              {avatarImage ? (
+                <img src={avatarImage} alt="Avatar" className="w-full h-full object-cover" />
+              ) : (
+                <UploadCloud className="w-5 h-5 text-slate-400" />
+              )}
+              <input type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />
+            </label>
           </div>
         </section>
 
-        {/* 2. CENTER COLUMN: Script & Complete Audio Mix */}
-        <section
-          className={`lg:col-span-5 flex flex-col space-y-3.5 ${
-            activeTab === "script" ? "flex" : "hidden lg:flex"
-          }`}
-        >
+        {/* 2. CENTER COLUMN: Script & Audio Mix with 2-Preview Capping */}
+        <section className={`lg:col-span-5 flex flex-col space-y-3.5 ${activeTab === "script" ? "flex" : "hidden lg:flex"}`}>
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-3.5 sm:p-5 flex flex-col justify-between min-h-[460px] lg:min-h-[520px]">
             <div className="space-y-3 overflow-y-auto max-h-[60vh] lg:max-h-[460px] pl-1">
               {scriptData || previewAudioUrl ? (
                 <div className="space-y-3">
-                  {/* Generated Script Display */}
                   {scriptData && (
                     <>
                       <div className="p-3.5 sm:p-4 rounded-2xl bg-emerald-50/70 border border-emerald-200 space-y-2">
@@ -633,7 +701,7 @@ export default function StudioPage() {
                       <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
                         <span className="text-[11px] font-bold text-slate-600 flex items-center gap-1.5">
                           <Video className="w-3.5 h-3.5 text-slate-500" />
-                          المشهد وحركة الكاميرا (Kling 2.6):
+                          المشهد وحركة الكاميرا:
                         </span>
                         <p className="text-xs text-slate-600 leading-relaxed">{scriptData.visualPromptAr}</p>
                       </div>
@@ -647,38 +715,44 @@ export default function StudioPage() {
                     </>
                   )}
 
-                  {/* Complete Mixed Audio Trigger / Player */}
+                  {/* Audio Generation with 2-Preview Enforcement */}
                   {!previewAudioUrl ? (
-                    <button
-                      type="button"
-                      disabled={loadingAudio}
-                      onClick={handleGenerateAudio}
-                      className="w-full min-h-[46px] py-3 bg-slate-900 hover:bg-slate-800 active:scale-[0.99] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-xs transition-all disabled:opacity-50"
-                    >
-                      {loadingAudio ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          <span>جاري توليد ودمج الصوت والمؤثرات (ElevenLabs)...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Volume2 className="w-4 h-4 text-emerald-400" />
-                          <span>تأكيد السكريبت وتوليد الصوت المدمج 🎧</span>
-                        </>
-                      )}
-                    </button>
+                    <div className="space-y-1.5">
+                      <button
+                        type="button"
+                        disabled={loadingAudio || audioPreviewCount >= 2}
+                        onClick={handleGenerateAudio}
+                        className="w-full min-h-[46px] py-3 bg-slate-900 hover:bg-slate-800 active:scale-[0.99] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-xs transition-all disabled:opacity-50"
+                      >
+                        {loadingAudio ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <span>جاري توليد ودمج الصوت...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Volume2 className="w-4 h-4 text-emerald-400" />
+                            <span>توليد ومعاينة الصوت (متبقي {2 - audioPreviewCount} من 2) 🎧</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
                   ) : (
-                    /* Single Unified Mixed Audio Review Bar (No Download Button) */
                     <div className="p-3.5 bg-emerald-50/50 border border-emerald-200 rounded-xl space-y-2">
                       <div className="flex items-center justify-between text-[11px] font-bold text-emerald-900">
                         <span className="flex items-center gap-1.5">
                           <Volume2 className="w-4 h-4 text-emerald-600" />
-                          معاينة الصوت الكامل والمؤثرات (Mix جاهز):
+                          معاينة الصوت الكامل ({audioPreviewCount}/2 معاينات مستهلكة):
                         </span>
-                        {previewSfxUrl && (
-                          <span className="text-[10px] text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full font-bold">
-                            صوت + Foley SFX مدمج ✅
-                          </span>
+                        {audioPreviewCount < 2 && (
+                          <button
+                            type="button"
+                            onClick={handleGenerateAudio}
+                            disabled={loadingAudio}
+                            className="text-[10px] text-emerald-700 underline hover:text-emerald-900 font-bold"
+                          >
+                            إعادة توليد (متبقي 1)
+                          </button>
                         )}
                       </div>
                       
@@ -731,7 +805,7 @@ export default function StudioPage() {
                   </div>
                   <p className="text-xs font-bold text-slate-600">الاستوديو جاهز للبدء</p>
                   <p className="text-[11px] text-slate-400 max-w-xs">
-                    ارفع صورة السلعة واكتب تفاصيلها بالأسفل لتوليد السكريبت، أو سجل صوتك مباشرة بالميكروفون من قسم الإعدادات.
+                    ارفع صور السلعة من قسم الإعدادات، واكتب وصف العرض بالأسفل لإنشاء السكريبت ومعاينة الصوت مجاناً.
                   </p>
                 </div>
               )}
@@ -764,11 +838,7 @@ export default function StudioPage() {
         </section>
 
         {/* 3. RIGHT COLUMN: Phone Mockup Preview */}
-        <section
-          className={`lg:col-span-4 flex flex-col items-center justify-center ${
-            activeTab === "preview" ? "flex" : "hidden lg:flex"
-          }`}
-        >
+        <section className={`lg:col-span-4 flex flex-col items-center justify-center ${activeTab === "preview" ? "flex" : "hidden lg:flex"}`}>
           <div className="relative w-full max-w-[280px] sm:max-w-[300px] lg:max-w-[310px] aspect-[9/18] max-h-[72vh] bg-black rounded-[38px] sm:rounded-[42px] p-2.5 shadow-2xl border-[4px] sm:border-[5px] border-slate-800 ring-1 ring-slate-900/40 flex flex-col justify-between overflow-hidden">
             <div className="absolute top-3 left-1/2 -translate-x-1/2 w-20 h-3.5 bg-slate-900 rounded-full z-30 flex items-center justify-center">
               <div className="w-2 h-2 rounded-full bg-black/60 border border-slate-700 mr-1" />
@@ -777,9 +847,9 @@ export default function StudioPage() {
             <div className="relative w-full h-full rounded-[30px] sm:rounded-[32px] overflow-hidden bg-slate-950 flex flex-col justify-between">
               {finalVideoUrl ? (
                 <video src={finalVideoUrl} controls autoPlay loop playsInline className="absolute inset-0 w-full h-full object-cover" />
-              ) : productImage ? (
+              ) : productImages[0] ? (
                 <div className="absolute inset-0 w-full h-full">
-                  <img src={productImage} alt="Preview Canvas" className="w-full h-full object-cover" />
+                  <img src={productImages[0]} alt="Preview Canvas" className="w-full h-full object-cover" />
                   <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/85" />
                 </div>
               ) : (
@@ -829,8 +899,14 @@ export default function StudioPage() {
             </div>
           </div>
         </section>
-
       </main>
+
+      {/* Commercial Zero-Credit Paywall Popup */}
+      <BaridiMobModal
+        isOpen={showPaywallModal}
+        onClose={() => setShowPaywallModal(false)}
+        selectedPackAmount="3,900"
+      />
 
       {/* Mobile Glassmorphic Bottom Tab Navigation */}
       <nav className="lg:hidden fixed bottom-3 inset-x-3 z-50 bg-white/95 backdrop-blur-lg border border-slate-200/80 rounded-2xl px-3 py-1.5 flex items-center justify-around shadow-lg">
