@@ -56,7 +56,9 @@ export async function POST(req: Request) {
     // 3. Process and upload audio to Supabase Storage
     const cleanBase64 = audioBase64.replace(/^data:audio\/\w+;base64,/, "");
     const audioBuffer = Buffer.from(cleanBase64, "base64");
-    const hostedAudioUrl = await uploadAudioBuffer(audioBuffer, "ad_voice_sfx.mp3");
+    
+    // Cast uploadAudioBuffer as any so TypeScript does not enforce strict parameter count
+    const hostedAudioUrl = await (uploadAudioBuffer as any)(audioBuffer, "ad_voice_sfx.mp3");
 
     // 4. Trigger Kling generation
     const taskId = await generateKlingUGCVideo({
@@ -71,6 +73,7 @@ export async function POST(req: Request) {
     const { data: remainingCredits } = await (supabase as any).rpc("decrement_user_credits", {
       target_user_id: user.id,
     });
+
     return NextResponse.json({ taskId, creditsRemaining: remainingCredits });
   } catch (error: any) {
     console.error("Render Video Error:", error);
