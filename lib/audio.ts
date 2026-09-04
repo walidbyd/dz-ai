@@ -90,7 +90,7 @@ export async function mixVoiceAndSFX(
     return fs.readFileSync(mixedFile);
   } finally {
     [voiceFile, sfxFile, mixedFile].forEach((f) => {
-      if (fs.existsSync(f)) {
+      if (fs.existsSync(/*turbopackIgnore: true*/ f)) {
         try {
           fs.unlinkSync(f);
         } catch {}

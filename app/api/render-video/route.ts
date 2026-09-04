@@ -68,10 +68,10 @@ export async function POST(req: Request) {
     });
 
     // 5. Automatically deduct 1 credit from Supabase
-    const { data: remainingCredits } = await (supabase as any).rpc("decrement_user_credits", {
-      target_user_id: user.id,
-    });
-
+ const { data: remainingCredits } = await (supabase.rpc as any)(
+  "decrement_user_credits",
+  { target_user_id: user.id }
+);
     return NextResponse.json({ taskId, creditsRemaining: remainingCredits });
   } catch (error: any) {
     console.error("Render Video Error:", error);
