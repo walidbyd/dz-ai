@@ -379,7 +379,7 @@ export default function StudioPage() {
       if (!res.ok || !data.taskId) throw new Error(data.error || "فشل إطلاق عملية الرندر");
 
       const taskId = data.taskId;
-      setRenderStatus("تم إرسال الطلب إلى Kling! جاري توليد وتحريك الفيديو (1-2 دقيقة)...");
+      setRenderStatus("تم إرسال الطلب  ! جاري توليد وتحريك الفيديو (1-2 دقيقة)...");
 
       const pollInterval = setInterval(async () => {
         try {
@@ -477,7 +477,7 @@ export default function StudioPage() {
                 <Mic className="w-4 h-4 text-emerald-600" />
                 المعلق الصوتي:
               </span>
-              <span className="text-[10px] text-slate-400 font-medium">دارجة عاصمية V3</span>
+              <span className="text-[10px] text-slate-400 font-medium">دارجة  V3</span>
             </label>
 
             {/* Top 2 AI Voices */}
@@ -692,7 +692,7 @@ export default function StudioPage() {
                             السكريبت الإعلاني (7-9 ثوانٍ):
                           </span>
                           <span className="text-[10px] bg-white px-2 py-0.5 rounded-full border border-emerald-300 font-semibold">
-                            عاصمي نقي
+                            تجاري
                           </span>
                         </div>
                         <p className="text-sm font-bold leading-relaxed text-slate-900">{scriptData.script}</p>
@@ -788,7 +788,7 @@ export default function StudioPage() {
                     {isRendering ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        <span className="truncate">{renderStatus || "جاري إنتاج الفيديو عبر Kling 2.6..."}</span>
+                        <span className="truncate">{renderStatus || "جاري إنتاج الفيديو  ..."}</span>
                       </>
                     ) : (
                       <>
@@ -893,7 +893,7 @@ export default function StudioPage() {
                 </p>
                 <div className="flex items-center gap-1.5 text-[9px] text-white/70">
                   <Music className="w-3 h-3 text-emerald-400 animate-spin" />
-                  <span className="truncate">لهجة عاصمية • صوت طبيعي</span>
+                  <span className="truncate">لهجة  • صوت طبيعي</span>
                 </div>
               </div>
             </div>
