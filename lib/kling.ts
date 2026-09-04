@@ -1,112 +1,47 @@
 // lib/kling.ts
 
-const KLING_BASE_URL = "https://api.klingai.com";
+const FAL_BASE_URL = "https://queue.fal.run/fal-ai/kling-video/v2.6/pro/image-to-video";
 
 /**
- * Returns the authorization header using your Kling API Key.
- */
-function getKlingAuthHeader(): string {
-  const apiKey = process.env.KLING_API_KEY || process.env.KLING_ACCESS_KEY;
-
-  if (!apiKey) {
-    throw new Error("Missing KLING_API_KEY in environment variables");
-  }
-
-  // Unified API key format (api-key-kling-...)
-  if (apiKey.startsWith("api-key-kling-")) {
-    return `Bearer ${apiKey}`;
-  }
-
-  // Fallback for legacy key + secret (JWT)
-  const secretKey = process.env.KLING_SECRET_KEY;
-  if (secretKey) {
-    const jwt = require("jsonwebtoken");
-    const now = Math.floor(Date.now() / 1000);
-    const payload = {
-      iss: apiKey,
-      exp: now + 1800,
-      nbf: now - 5,
-    };
-    const token = jwt.sign(payload, secretKey, {
-      algorithm: "HS256",
-      header: { alg: "HS256", typ: "JWT" },
-    });
-    return `Bearer ${token}`;
-  }
-
-  return `Bearer ${apiKey}`;
-}
-
-/**
- * Initiates an Image-to-Video generation task on Kling 2.6:
- * - Model: kling-v2-6
- * - Mode: std (Standard)
- * - Sound: off (Silent, no voice/AI audio generated)
- * - Format: 9:16 Vertical Reel
+ * Initiates an Image-to-Video generation task on Kling 2.6 via fal.ai REST API.
+ * Uses native fetch — zero extra npm packages needed!
  */
 export async function generateKlingUGCVideo(
   prompt: string,
   imageUrl: string
 ): Promise<string> {
-  const authHeader = getKlingAuthHeader();
+  const falKey = process.env.FAL_KEY;
+  if (!falKey) {
+    throw new Error("Missing FAL_KEY in environment variables");
+  }
 
-  const response = await fetch(`${KLING_BASE_URL}/v1/videos/image2video`, {
+  const response = await fetch(FAL_BASE_URL, {
     method: "POST",
     headers: {
+      Authorization: `Key ${falKey}`,
       "Content-Type": "application/json",
-      Authorization: authHeader,
     },
     body: JSON.stringify({
-      model_name: "kling-v2-6",
-      mode: "std",
-      sound: "off",
-      image: imageUrl,
-      prompt: prompt,
-      cfg_scale: 0.5,
+      prompt,
+      start_image_url: imageUrl,
       duration: "5",
       aspect_ratio: "9:16",
+      generate_audio: false,
     }),
   });
 
   const data = await response.json();
-  if (!response.ok || data.code !== 0) {
-    throw new Error(`Kling Video Error: ${data.message || response.statusText}`);
+
+  if (!response.ok) {
+    const errorMsg = data.detail || data.message || JSON.stringify(data);
+    throw new Error(`fal.ai Error (${response.status}): ${errorMsg}`);
   }
 
-  return data.data.task_id;
+  return data.request_id;
 }
 
 /**
- * Initiates an audio lip-sync task for an existing video.
- */
-export async function syncKlingLipSync(
-  videoUrl: string,
-  audioUrl: string
-): Promise<string> {
-  const authHeader = getKlingAuthHeader();
-
-  const response = await fetch(`${KLING_BASE_URL}/v1/videos/lipsync`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: authHeader,
-    },
-    body: JSON.stringify({
-      video_url: videoUrl,
-      audio_url: audioUrl,
-    }),
-  });
-
-  const data = await response.json();
-  if (!response.ok || data.code !== 0) {
-    throw new Error(`Kling LipSync Error: ${data.message || response.statusText}`);
-  }
-
-  return data.data.task_id;
-}
-
-/**
- * Checks the status of an ongoing Kling task.
+ * Checks the status of an ongoing fal.ai Kling task.
  * Returns { status, videoUrl }
  */
 export async function checkKlingTaskStatus(
@@ -117,30 +52,47 @@ export async function checkKlingTaskStatus(
   videoUrl?: string;
   error?: string;
 }> {
-  const authHeader = getKlingAuthHeader();
-  const endpoint = `${KLING_BASE_URL}/v1/videos/${type}/${taskId}`;
+  const falKey = process.env.FAL_KEY;
+  if (!falKey) {
+    throw new Error("Missing FAL_KEY in environment variables");
+  }
 
-  const response = await fetch(endpoint, {
+  const statusUrl = `https://queue.fal.run/fal-ai/kling-video/v2.6/pro/image-to-video/requests/${taskId}/status`;
+
+  const response = await fetch(statusUrl, {
     method: "GET",
     headers: {
-      Authorization: authHeader,
+      Authorization: `Key ${falKey}`,
     },
   });
 
   const data = await response.json();
-  if (!response.ok || data.code !== 0) {
-    throw new Error(`Kling Query Error: ${data.message || response.statusText}`);
+
+  if (!response.ok) {
+    return {
+      status: "failed",
+      error: data.detail || "Failed to check task status on fal.ai",
+    };
   }
 
-  const taskStatus = data.data.task_status;
-  if (taskStatus === "succeed") {
-    const videoResult = data.data.task_result?.videos?.[0]?.url;
-    return { status: "succeed", videoUrl: videoResult };
+  if (data.status === "COMPLETED") {
+    // Fetch result
+    const resultUrl = `https://queue.fal.run/fal-ai/kling-video/v2.6/pro/image-to-video/requests/${taskId}`;
+    const resResponse = await fetch(resultUrl, {
+      headers: { Authorization: `Key ${falKey}` },
+    });
+    const resData = await resResponse.json();
+    const videoUrl = resData.video?.url || resData.output?.url;
+    return { status: "succeed", videoUrl };
   }
 
-  if (taskStatus === "failed") {
-    return { status: "failed", error: data.data.task_status_msg || "Render failed" };
+  if (data.status === "IN_PROGRESS") {
+    return { status: "processing" };
   }
 
-  return { status: taskStatus };
+  if (data.status === "IN_QUEUE") {
+    return { status: "submitted" };
+  }
+
+  return { status: "failed", error: "Generation failed on fal.ai" };
 }
