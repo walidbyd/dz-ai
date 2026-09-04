@@ -1,20 +1,20 @@
+// app/auth/callback/route.ts
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 
 export async function GET(request: Request) {
-  const { searchParams, origin } = new URL(request.url);
-  const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/studio";
+  const requestUrl = new URL(request.url);
+  const code = requestUrl.searchParams.get("code");
+  const next = requestUrl.searchParams.get("next") ?? "/studio";
 
-  // If deployed on Render, guarantee redirects stay on the live URL
-  const forwardedHost = request.headers.get("x-forwarded-host");
-  const isLocalhost = origin.includes("localhost");
-  const baseUrl = isLocalhost
-    ? origin
-    : forwardedHost
-    ? `https://${forwardedHost}`
-    : "https://dz-ai-fvx6.onrender.com";
+  // 1. Properly detect Render's public domain instead of internal container port
+  const headersList = await headers();
+  const host = headersList.get("x-forwarded-host") || headersList.get("host") || requestUrl.host;
+  const proto = headersList.get("x-forwarded-proto") || (host.includes("localhost") ? "http" : "https");
+  
+  // Public production base URL
+  const publicOrigin = `${proto}://${host}`;
 
   if (code) {
     const cookieStore = await cookies();
@@ -31,7 +31,9 @@ export async function GET(request: Request) {
               cookiesToSet.forEach(({ name, value, options }) =>
                 cookieStore.set(name, value, options)
               );
-            } catch {}
+            } catch {
+              // Ignore inside server component
+            }
           },
         },
       }
@@ -39,10 +41,9 @@ export async function GET(request: Request) {
 
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
-      return NextResponse.redirect(`${baseUrl}${next}`);
+      return NextResponse.redirect(`${publicOrigin}${next}`);
     }
   }
 
-  // Redirect to login on error
-  return NextResponse.redirect(`${baseUrl}/login?error=auth_failed`);
+  return NextResponse.redirect(`${publicOrigin}/login?error=auth_failed`);
 }
