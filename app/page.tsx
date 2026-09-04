@@ -29,7 +29,7 @@ export default function LandingPage() {
       duration: "00:10",
       hook: "الساعة الذكية لي كامل راهم يحوسو عليها مع توصيل مجاني!",
       creator: "صوت وليد (أفاتار)",
-      videoUrl: "/demo-1.mp4", // Fallback to demo-1 until you upload demo-2
+      videoUrl: "/demo-2.mp4", // Fallback to demo-1 until you upload demo-2
     },
     {
       title: "برغر وماكلة خفيفة",
