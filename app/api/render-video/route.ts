@@ -68,7 +68,7 @@ export async function POST(req: Request) {
     });
 
     // 5. Automatically deduct 1 credit from Supabase
-    const { data: remainingCredits } = await supabase.rpc("decrement_user_credits", {
+    const { data: remainingCredits } = await (supabase as any).rpc("decrement_user_credits", {
       target_user_id: user.id,
     });
 
