@@ -1,11 +1,17 @@
 "use client";
 
-import { useState } from "react";
-import { Play, CheckCircle2, Sparkles, ArrowLeft, Video, Zap } from "lucide-react";
+import { useState, useRef } from "react";
+import { Play, CheckCircle2, Sparkles, ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
 
 export default function LandingPage() {
   const [activeVideoIndex, setActiveVideoIndex] = useState(0);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Touch & Mouse Swipe Handlers
+  const touchStartX = useRef<number | null>(null);
+  const touchEndX = useRef<number | null>(null);
+  const isDragging = useRef<boolean>(false);
 
   const sampleVideos = [
     {
@@ -14,7 +20,7 @@ export default function LandingPage() {
       duration: "00:10",
       hook: "سيروم طبيعي 100% يرجع لبشرتك النضارة من أول أسبوع!",
       creator: "صوت سارة (أفاتار)",
-      bgGradient: "from-amber-700 to-rose-950",
+      videoUrl: "/demo-1.mp4",
     },
     {
       title: "ساعات ذكية وإلكترونيات",
@@ -22,7 +28,7 @@ export default function LandingPage() {
       duration: "00:10",
       hook: "الساعة الذكية لي كامل راهم يحوسو عليها مع توصيل مجاني!",
       creator: "صوت وليد (أفاتار)",
-      bgGradient: "from-blue-800 to-slate-950",
+      videoUrl: "/demo-2.mp4",
     },
     {
       title: "برغر وماكلة خفيفة",
@@ -30,9 +36,65 @@ export default function LandingPage() {
       duration: "00:10",
       hook: "أبن برغر في العاصمة، جرب وما تندمش!",
       creator: "فيديو السلعة (Voiceover B-roll)",
-      bgGradient: "from-orange-800 to-amber-950",
+      videoUrl: "/demo-3.mp4",
     },
   ];
+
+  const handleNextVideo = () => {
+    setActiveVideoIndex((prev) => (prev + 1) % sampleVideos.length);
+  };
+
+  const handlePrevVideo = () => {
+    setActiveVideoIndex((prev) => (prev - 1 + sampleVideos.length) % sampleVideos.length);
+  };
+
+  // Swipe detection threshold
+  const minSwipeDistance = 45;
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    touchEndX.current = null;
+    touchStartX.current = e.targetTouches[0].clientX;
+  };
+
+  const onTouchMove = (e: React.TouchEvent) => {
+    touchEndX.current = e.targetTouches[0].clientX;
+  };
+
+  const onTouchEnd = () => {
+    if (!touchStartX.current || !touchEndX.current) return;
+    const distance = touchStartX.current - touchEndX.current;
+    if (distance > minSwipeDistance) {
+      // Swiped Left
+      handleNextVideo();
+    } else if (distance < -minSwipeDistance) {
+      // Swiped Right
+      handlePrevVideo();
+    }
+  };
+
+  // Desktop Mouse Drag Support
+  const onMouseDown = (e: React.MouseEvent) => {
+    isDragging.current = true;
+    touchEndX.current = null;
+    touchStartX.current = e.clientX;
+  };
+
+  const onMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging.current) return;
+    touchEndX.current = e.clientX;
+  };
+
+  const onMouseUp = () => {
+    if (!isDragging.current) return;
+    isDragging.current = false;
+    if (!touchStartX.current || !touchEndX.current) return;
+    const distance = touchStartX.current - touchEndX.current;
+    if (distance > minSwipeDistance) {
+      handleNextVideo();
+    } else if (distance < -minSwipeDistance) {
+      handlePrevVideo();
+    }
+  };
 
   const steps = [
     {
@@ -103,14 +165,14 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* SHOWCASE SECTION */}
+        {/* SHOWCASE SECTION WITH SWIPABLE PHONE */}
         <section className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center bg-white border border-slate-200 rounded-3xl p-4 md:p-8 shadow-sm">
           <div className="space-y-4">
             <h2 className="text-2xl md:text-3xl font-black text-slate-900">
               أمثلة على الفيديوهات لي تقدر تخدمها
             </h2>
             <p className="text-sm text-slate-500">
-              فيديوهات عمودية (9:16) واجدة مباشرة للنشر في تيكتوك وفيسبوك ريلز.
+              فيديوهات عمودية (9:16) واجدة مباشرة للنشر. اضغط على الفئات أو اسحب الهاتف (Swipe) للتنقل بين النماذج:
             </p>
             <div className="flex flex-col gap-2 pt-2">
               {sampleVideos.map((vid, idx) => (
@@ -118,9 +180,9 @@ export default function LandingPage() {
                   key={idx}
                   type="button"
                   onClick={() => setActiveVideoIndex(idx)}
-                  className={`p-3 rounded-xl border text-right transition-all flex items-center justify-between ${
+                  className={`p-3 rounded-xl border text-right transition-all flex items-center justify-between cursor-pointer ${
                     activeVideoIndex === idx
-                      ? "border-emerald-500 bg-emerald-50 shadow-sm"
+                      ? "border-emerald-500 bg-emerald-50 shadow-sm ring-1 ring-emerald-500"
                       : "border-slate-200 hover:bg-slate-50"
                   }`}
                 >
@@ -130,38 +192,96 @@ export default function LandingPage() {
                     </h3>
                     <p className="text-[11px] text-slate-500">{vid.creator}</p>
                   </div>
-                  {activeVideoIndex === idx && <Play className="w-4 h-4 text-emerald-600" />}
+                  {activeVideoIndex === idx && <Play className="w-4 h-4 text-emerald-600 fill-emerald-600" />}
                 </button>
               ))}
             </div>
           </div>
 
-          <div className="relative aspect-[9/16] w-full max-w-[260px] mx-auto md:mr-auto rounded-3xl overflow-hidden border-4 border-slate-900 bg-slate-950 shadow-2xl flex flex-col justify-between p-4">
-            <div className={`absolute inset-0 bg-gradient-to-b ${sampleVideos[activeVideoIndex].bgGradient} opacity-70`} />
-            
-            <div className="relative z-10 flex justify-between items-center text-[10px] text-white/80 font-mono">
-              <span className="bg-black/40 backdrop-blur-sm px-2 py-0.5 rounded-full">
-                {sampleVideos[activeVideoIndex].duration}
-              </span>
-              <span className="bg-emerald-500 text-slate-950 font-bold px-2 py-0.5 rounded-full">
-                UGC Ad
-              </span>
-            </div>
+          {/* SWIPE-ENABLED PHONE MOCKUP */}
+          <div className="flex flex-col items-center gap-2">
+            <div
+              onTouchStart={onTouchStart}
+              onTouchMove={onTouchMove}
+              onTouchEnd={onTouchEnd}
+              onMouseDown={onMouseDown}
+              onMouseMove={onMouseMove}
+              onMouseUp={onMouseUp}
+              onMouseLeave={onMouseUp}
+              className="relative aspect-[9/16] w-full max-w-[280px] mx-auto rounded-[38px] overflow-hidden border-[5px] border-slate-900 bg-slate-950 shadow-2xl flex flex-col justify-between p-3 select-none cursor-grab active:cursor-grabbing"
+            >
+              {/* Real Video Element */}
+              <video
+                ref={videoRef}
+                key={sampleVideos[activeVideoIndex].videoUrl}
+                src={sampleVideos[activeVideoIndex].videoUrl}
+                controls
+                playsInline
+                loop
+                autoPlay
+                muted
+                className="absolute inset-0 w-full h-full object-cover z-0 pointer-events-auto"
+              />
 
-            <div className="relative z-10 text-center space-y-2">
-              <div className="w-14 h-14 mx-auto rounded-full bg-white/20 backdrop-blur-md border border-white/40 flex items-center justify-center text-white shadow-lg cursor-pointer hover:scale-105 transition-transform">
-                <Play className="w-6 h-6 fill-white ml-1" />
+              {/* Dynamic Island Notch */}
+              <div className="absolute top-2.5 left-1/2 -translate-x-1/2 w-16 h-3 bg-slate-900 rounded-full z-30 pointer-events-none" />
+
+              {/* Top Badges */}
+              <div className="relative z-10 flex justify-between items-center text-[10px] text-white/90 font-mono pointer-events-none mt-1">
+                <span className="bg-black/50 backdrop-blur-md px-2.5 py-0.5 rounded-full font-bold">
+                  {sampleVideos[activeVideoIndex].duration}
+                </span>
+                <span className="bg-emerald-600 text-white font-bold px-2.5 py-0.5 rounded-full shadow-sm">
+                  UGC Ad
+                </span>
+              </div>
+
+              {/* Side Floating Swipe Arrows */}
+              <button
+                type="button"
+                onClick={handlePrevVideo}
+                className="absolute left-2 top-1/2 -translate-y-1/2 z-30 w-7 h-7 rounded-full bg-black/40 hover:bg-black/70 backdrop-blur-md text-white flex items-center justify-center transition-all cursor-pointer"
+                aria-label="Previous Video"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={handleNextVideo}
+                className="absolute right-2 top-1/2 -translate-y-1/2 z-30 w-7 h-7 rounded-full bg-black/40 hover:bg-black/70 backdrop-blur-md text-white flex items-center justify-center transition-all cursor-pointer"
+                aria-label="Next Video"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+
+              <div className="flex-1 pointer-events-none" />
+
+              {/* Bottom Subtitle Caption */}
+              <div className="relative z-10 bg-slate-950/85 backdrop-blur-md p-2.5 rounded-2xl border border-white/10 text-center pointer-events-none mb-1">
+                <span className="text-[9px] font-bold text-emerald-400 block mb-0.5 font-mono uppercase">
+                  السكريبت (الدارجة):
+                </span>
+                <p className="text-xs text-white font-bold leading-relaxed line-clamp-2">
+                  &ldquo;{sampleVideos[activeVideoIndex].hook}&rdquo;
+                </p>
               </div>
             </div>
 
-            <div className="relative z-10 bg-slate-950/80 backdrop-blur-md p-3 rounded-2xl border border-white/10 text-center">
-              <span className="text-[9px] font-bold text-emerald-400 block mb-1 font-mono uppercase">
-                السكريبت (الدارجة):
-              </span>
-              <p className="text-xs text-white font-bold leading-relaxed">
-                "{sampleVideos[activeVideoIndex].hook}"
-              </p>
+            {/* Pagination Dots */}
+            <div className="flex items-center gap-1.5 pt-1">
+              {sampleVideos.map((_, dotIdx) => (
+                <button
+                  key={dotIdx}
+                  type="button"
+                  onClick={() => setActiveVideoIndex(dotIdx)}
+                  aria-label={`Video ${dotIdx + 1}`}
+                  className={`h-1.5 rounded-full transition-all cursor-pointer ${
+                    activeVideoIndex === dotIdx ? "w-6 bg-emerald-600" : "w-1.5 bg-slate-300"
+                  }`}
+                />
+              ))}
             </div>
+            <span className="text-[10px] text-slate-400 font-medium">اسحب يميناً أو يساراً للتغيير 📱</span>
           </div>
         </section>
 
@@ -183,7 +303,7 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* PRICING (Updated with Cost Multiplier Architecture) */}
+        {/* PRICING */}
         <section className="space-y-8">
           <div className="text-center space-y-2">
             <h2 className="text-2xl md:text-3xl font-black text-slate-900">باقات الكريدي</h2>
