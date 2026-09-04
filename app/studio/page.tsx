@@ -91,10 +91,19 @@ export default function StudioPage() {
   useEffect(() => {
     async function fetchUserProfile() {
       try {
-        const res = await fetch("/api/user");
+        const res = await fetch("/api/user", {
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
+
+        if (res.status === 401 || res.status === 403) {
+          window.location.href = "/login";
+          return;
+        }
+
         const data = await res.json();
-        if (!data.authenticated) {
-          router.push("/login");
+        if (!data || !data.authenticated) {
+          window.location.href = "/login";
           return;
         }
         setCredits(data.credits ?? 0);
@@ -102,12 +111,13 @@ export default function StudioPage() {
         if (data.user?.avatar) setUserAvatar(data.user.avatar);
       } catch (err) {
         console.error("Failed to load user profile:", err);
+        window.location.href = "/login";
       } finally {
         setLoadingUser(false);
       }
     }
     fetchUserProfile();
-  }, [router]);
+  }, []);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, setter: (val: string) => void) => {
     const file = e.target.files?.[0];

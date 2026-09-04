@@ -31,7 +31,7 @@ export async function GET() {
     } = await supabase.auth.getUser();
 
     if (userError || !user) {
-      return NextResponse.json({ authenticated: false, credits: 0 });
+      return NextResponse.json({ authenticated: false, credits: 0 }, { status: 401 });
     }
 
     const { data: profile } = await supabase
