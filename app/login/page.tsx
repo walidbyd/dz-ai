@@ -11,10 +11,19 @@ export default function LoginPage() {
   const handleGoogleSignIn = async () => {
     try {
       setLoading(true);
+
+      // Determine redirect URL: use local origin when testing locally, otherwise use Render production domain
+      const isLocal =
+        typeof window !== "undefined" &&
+        window.location.hostname === "localhost";
+      const redirectBase = isLocal
+        ? window.location.origin
+        : "https://dz-ai-fvx6.onrender.com";
+
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/auth/callback?next=/studio`,
+          redirectTo: `${redirectBase}/auth/callback?next=/studio`,
         },
       });
       if (error) throw error;

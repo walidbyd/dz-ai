@@ -1,4 +1,3 @@
-// app/auth/callback/route.ts
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
@@ -7,6 +6,15 @@ export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
   const next = searchParams.get("next") ?? "/studio";
+
+  // If deployed on Render, guarantee redirects stay on the live URL
+  const forwardedHost = request.headers.get("x-forwarded-host");
+  const isLocalhost = origin.includes("localhost");
+  const baseUrl = isLocalhost
+    ? origin
+    : forwardedHost
+    ? `https://${forwardedHost}`
+    : "https://dz-ai-fvx6.onrender.com";
 
   if (code) {
     const cookieStore = await cookies();
@@ -23,9 +31,7 @@ export async function GET(request: Request) {
               cookiesToSet.forEach(({ name, value, options }) =>
                 cookieStore.set(name, value, options)
               );
-            } catch {
-              // Can be ignored if called from a server component
-            }
+            } catch {}
           },
         },
       }
@@ -33,9 +39,10 @@ export async function GET(request: Request) {
 
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
-      return NextResponse.redirect(`${origin}${next}`);
+      return NextResponse.redirect(`${baseUrl}${next}`);
     }
   }
 
-  return NextResponse.redirect(`${origin}/login?error=auth_failed`);
+  // Redirect to login on error
+  return NextResponse.redirect(`${baseUrl}/login?error=auth_failed`);
 }
