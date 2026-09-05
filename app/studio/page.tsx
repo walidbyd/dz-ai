@@ -31,6 +31,7 @@ import {
   Trash2,
   ShoppingBag,
   Download,
+  Flame,
 } from "lucide-react";
 import Link from "next/link";
 import { BaridiMobModal } from "@/components/BaridiMobModal";
@@ -43,52 +44,47 @@ interface ChatMessage {
 export default function StudioPage() {
   const router = useRouter();
 
-  // Authentication & Profile states
   const [userName, setUserName] = useState<string>("");
   const [userAvatar, setUserAvatar] = useState<string | null>(null);
   const [credits, setCredits] = useState<number>(3);
   const [loadingUser, setLoadingUser] = useState<boolean>(true);
 
-  // Studio UI states
   const [activeTab, setActiveTab] = useState<"preview" | "script" | "settings">("settings");
-
-  // Product Images State (Horizontal Grid up to 4 images)
   const [productImages, setProductImages] = useState<string[]>([]);
 
-  // Voice Selection State
   const [voiceCategory, setVoiceCategory] = useState<"ai" | "custom">("ai");
   const [voice, setVoice] = useState<"sarah" | "walid" | "custom">("sarah");
   const [customAudioName, setCustomAudioName] = useState<string | null>(null);
 
-  // Microphone Live Recording states
   const [isRecordingMic, setIsRecordingMic] = useState(false);
   const [recordDuration, setRecordDuration] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Script & Interactive Gemini Chat
   const [inputPrompt, setInputPrompt] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [loadingScript, setLoadingScript] = useState(false);
   const [scriptData, setScriptData] = useState<{
+    hook?: string;
+    onScreenText?: string;
     script: string;
     visualPromptAr: string;
     visualPromptEn: string;
     sfxPrompt?: string;
   } | null>(null);
 
-  // Audio Preview Limits & State (Capped at 2)
   const [audioPreviewCount, setAudioPreviewCount] = useState<number>(0);
   const [previewAudioUrl, setPreviewAudioUrl] = useState<string | null>(null);
   const [previewSfxUrl, setPreviewSfxUrl] = useState<string | null>(null);
   const [loadingAudio, setLoadingAudio] = useState(false);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [isExportingVideo, setIsExportingVideo] = useState(false);
 
   const voiceAudioRef = useRef<HTMLAudioElement | null>(null);
   const sfxAudioRef = useRef<HTMLAudioElement | null>(null);
+  const previewVideoRef = useRef<HTMLVideoElement | null>(null);
 
-  // Rendering, Polling & Paywall Modal
   const [isRendering, setIsRendering] = useState(false);
   const [renderStatus, setRenderStatus] = useState<string>("جاري تحضير الفيديو...");
   const [finalVideoUrl, setFinalVideoUrl] = useState<string | null>(null);
@@ -96,7 +92,6 @@ export default function StudioPage() {
   const [showPaywallModal, setShowPaywallModal] = useState<boolean>(false);
   const isSubmittingRef = useRef(false);
 
-  // Fetch real user session & credits on initial mount
   useEffect(() => {
     async function fetchUserProfile() {
       try {
@@ -127,7 +122,6 @@ export default function StudioPage() {
     }
     fetchUserProfile();
 
-    // Auto-resume polling if page was refreshed during generation
     const savedTaskId = localStorage.getItem("active_render_task_id");
     if (savedTaskId) {
       setIsRendering(true);
@@ -157,6 +151,7 @@ export default function StudioPage() {
           setIsRendering(false);
           setRenderStatus("");
           setActiveTab("preview");
+          setIsPlayingAudio(false);
         } else if (pollData.status === "failed") {
           clearInterval(pollInterval);
           localStorage.removeItem("active_render_task_id");
@@ -169,7 +164,6 @@ export default function StudioPage() {
     }, 5000);
   };
 
-  // Multi-image file uploader (Max 4)
   const handleProductImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
@@ -193,7 +187,6 @@ export default function StudioPage() {
     setProductImages((prev) => prev.filter((_, i) => i !== index));
   };
 
-  // Custom Audio File Upload Handler
   const handleCustomAudioUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -207,7 +200,6 @@ export default function StudioPage() {
     }
   };
 
-  // Direct In-Browser Microphone Recording
   const startRecording = async () => {
     try {
       setErrorMsg(null);
@@ -258,7 +250,6 @@ export default function StudioPage() {
     }
   };
 
-  // Generate / Chat with Gemini to adjust the script
   const handleGenerateScript = async (customPrompt?: string) => {
     const textToSend = (customPrompt || inputPrompt).trim();
     if (productImages.length === 0 && chatMessages.length === 0) {
@@ -289,6 +280,8 @@ export default function StudioPage() {
       if (!res.ok || !data.success) throw new Error(data.error || "فشل توليد السكريبت");
 
       setScriptData({
+        hook: data.hook,
+        onScreenText: data.onScreenText,
         script: data.script,
         visualPromptAr: data.visualPromptAr,
         visualPromptEn: data.visualPromptEn,
@@ -310,7 +303,6 @@ export default function StudioPage() {
     }
   };
 
-  // Generate Mixed Audio (Voice + SFX) - Enforcing 2 Previews Limit
   const handleGenerateAudio = async () => {
     if (audioPreviewCount >= 2) {
       setErrorMsg("لقد استنفدت الحد الأقصى للمعاينة الصوتية (2/2). يمكنك الآن الانتقال لتوليد الفيديو.");
@@ -358,6 +350,7 @@ export default function StudioPage() {
     if (isPlayingAudio) {
       voiceAudioRef.current.pause();
       sfxAudioRef.current?.pause();
+      if (previewVideoRef.current) previewVideoRef.current.pause();
       setIsPlayingAudio(false);
     } else {
       voiceAudioRef.current.currentTime = 0;
@@ -370,11 +363,145 @@ export default function StudioPage() {
         sfxAudioRef.current.play().catch(console.error);
       }
 
+      if (previewVideoRef.current) {
+        previewVideoRef.current.currentTime = 0;
+        previewVideoRef.current.play().catch(console.error);
+      }
+
       setIsPlayingAudio(true);
     }
   };
 
-  // Video Rendering using Veo 3.1 Lite - Safe multi-submission lock
+  const toggleVideoPlaybackWithAudio = () => {
+    const vid = previewVideoRef.current;
+    if (!vid) return;
+
+    if (vid.paused) {
+      vid.play().catch(console.error);
+      if (voiceAudioRef.current) {
+        voiceAudioRef.current.currentTime = vid.currentTime;
+        voiceAudioRef.current.volume = 1.0;
+        voiceAudioRef.current.play().catch(console.error);
+      }
+      if (sfxAudioRef.current) {
+        sfxAudioRef.current.currentTime = vid.currentTime;
+        sfxAudioRef.current.volume = 0.85;
+        sfxAudioRef.current.play().catch(console.error);
+      }
+      setIsPlayingAudio(true);
+    } else {
+      vid.pause();
+      voiceAudioRef.current?.pause();
+      sfxAudioRef.current?.pause();
+      setIsPlayingAudio(false);
+    }
+  };
+
+  const handleDownloadMergedVideo = async () => {
+    if (!finalVideoUrl) return;
+
+    if (!previewAudioUrl) {
+      const a = document.createElement("a");
+      a.href = finalVideoUrl;
+      a.download = "ugc-ad-dz.mp4";
+      a.click();
+      return;
+    }
+
+    setIsExportingVideo(true);
+    try {
+      const videoEl = document.createElement("video");
+      videoEl.crossOrigin = "anonymous";
+      videoEl.src = finalVideoUrl;
+      videoEl.muted = true;
+
+      const audioEl = document.createElement("audio");
+      audioEl.crossOrigin = "anonymous";
+      audioEl.src = previewAudioUrl;
+
+      await Promise.all([
+        new Promise((res) => (videoEl.onloadedmetadata = res)),
+        new Promise((res) => (audioEl.onloadedmetadata = res)),
+      ]);
+
+      const actx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const dest = actx.createMediaStreamDestination();
+
+      const sourceAudio = actx.createMediaElementSource(audioEl);
+      sourceAudio.connect(dest);
+
+      let sfxEl: HTMLAudioElement | null = null;
+      if (previewSfxUrl) {
+        sfxEl = document.createElement("audio");
+        sfxEl.crossOrigin = "anonymous";
+        sfxEl.src = previewSfxUrl;
+        await new Promise((res) => (sfxEl!.onloadedmetadata = res));
+        const sourceSfxNode = actx.createMediaElementSource(sfxEl);
+        sourceSfxNode.connect(dest);
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = videoEl.videoWidth || 720;
+      canvas.height = videoEl.videoHeight || 1280;
+      const ctx = canvas.getContext("2d")!;
+
+      const canvasStream = canvas.captureStream(30);
+      const combinedStream = new MediaStream([
+        canvasStream.getVideoTracks()[0],
+        dest.stream.getAudioTracks()[0],
+      ]);
+
+      const mimeType = MediaRecorder.isTypeSupported("video/mp4;codecs=avc1,mp4a.40.2")
+        ? "video/mp4;codecs=avc1,mp4a.40.2"
+        : MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
+        ? "video/webm;codecs=vp9,opus"
+        : "video/webm";
+
+      const recorder = new MediaRecorder(combinedStream, { mimeType });
+      const chunks: Blob[] = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: mimeType });
+        const downloadUrl = URL.createObjectURL(blob);
+        const ext = mimeType.includes("mp4") ? "mp4" : "webm";
+        const a = document.createElement("a");
+        a.href = downloadUrl;
+        a.download = `ugc-ad-dz-with-audio.${ext}`;
+        a.click();
+        URL.revokeObjectURL(downloadUrl);
+        setIsExportingVideo(false);
+      };
+
+      recorder.start();
+      videoEl.play();
+      audioEl.play();
+      sfxEl?.play();
+
+      const drawLoop = () => {
+        if (!videoEl.paused && !videoEl.ended) {
+          ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+          requestAnimationFrame(drawLoop);
+        } else if (videoEl.ended) {
+          recorder.stop();
+          actx.close();
+        }
+      };
+      drawLoop();
+    } catch (err) {
+      console.warn("Direct merge fallback, downloading direct URL:", err);
+      const a = document.createElement("a");
+      a.href = finalVideoUrl;
+      a.download = "ugc-ad-dz.mp4";
+      a.target = "_blank";
+      a.click();
+      setIsExportingVideo(false);
+    }
+  };
+
   const handleRenderFinalVideo = async () => {
     if (isSubmittingRef.current || isRendering) return;
 
@@ -391,7 +518,7 @@ export default function StudioPage() {
     isSubmittingRef.current = true;
     setIsRendering(true);
     setErrorMsg(null);
-    setRenderStatus("جارٍ إطلاق مهمة الفيديو عبر Veo 3.1 Lite...");
+    setRenderStatus("جارٍ إطلاق مهمة الفيديو الإبداعية عبر Veo 3.1 Lite (8 ثوانٍ)...");
     setActiveTab("preview");
 
     try {
@@ -399,11 +526,9 @@ export default function StudioPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          audioBase64: previewAudioUrl,
           visualPromptEn:
-            scriptData?.visualPromptEn || "Dynamic Algerian UGC creator product showcase, 9:16 vertical video",
+            scriptData?.visualPromptEn || "Creative commercial product showcase, 9:16 vertical video",
           productImageUrl: productImages[0],
-          voice,
         }),
       });
 
@@ -413,7 +538,7 @@ export default function StudioPage() {
       const taskId = data.taskId;
       localStorage.setItem("active_render_task_id", taskId);
       setCredits((prev) => Math.max(0, prev - 1));
-      setRenderStatus("تم إرسال الطلب بنجاح! جاري توليد الفيديو (1-2 دقيقة)...");
+      setRenderStatus("تم إرسال الطلب بنجاح! جاري تحريك المشهد الإعلاني (8 ثوانٍ)...");
 
       pollTask(taskId);
     } catch (err: any) {
@@ -427,18 +552,18 @@ export default function StudioPage() {
 
   return (
     <div dir="rtl" className="min-h-screen bg-[#f8fafc] text-slate-800 font-sans antialiased flex flex-col pb-28 lg:pb-8">
-      {/* Hidden Audio Elements */}
       {previewAudioUrl && (
         <audio
           ref={voiceAudioRef}
           src={previewAudioUrl}
+          preload="auto"
           onEnded={() => {
             setIsPlayingAudio(false);
             sfxAudioRef.current?.pause();
           }}
         />
       )}
-      {previewSfxUrl && <audio ref={sfxAudioRef} src={previewSfxUrl} />}
+      {previewSfxUrl && <audio ref={sfxAudioRef} src={previewSfxUrl} preload="auto" />}
 
       {/* Header */}
       <header className="sticky top-0 z-40 h-14 bg-white/95 backdrop-blur-md border-b border-slate-200 px-3 md:px-8 flex items-center justify-between shadow-xs">
@@ -460,7 +585,7 @@ export default function StudioPage() {
             <h1 className="text-xs font-bold text-slate-900 leading-none">
               {userName || "مساعد الإعلانات الذكي"}
             </h1>
-            <span className="text-[10px] text-slate-400 font-medium">UGC Reels 9:16</span>
+            <span className="text-[10px] text-slate-400 font-medium">Viral UGC Reels 9:16 (8s)</span>
           </div>
           {userAvatar ? (
             <img src={userAvatar} alt="Profile" className="w-8 h-8 rounded-full border border-emerald-500 object-cover shadow-xs" />
@@ -483,20 +608,18 @@ export default function StudioPage() {
       {/* Main Workspace */}
       <main className="flex-1 max-w-[1440px] w-full mx-auto p-3 sm:p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 items-start">
         
-        {/* 1. LEFT COLUMN: Setup & Uploads */}
+        {/* 1. LEFT COLUMN: Product & Voice Settings */}
         <section className={`lg:col-span-3 space-y-3.5 ${activeTab === "settings" ? "block" : "hidden lg:block"}`}>
           
-          {/* Voice Hierarchy */}
           <div className="bg-white rounded-2xl border border-slate-200 p-3.5 shadow-xs space-y-3">
             <label className="text-xs font-bold text-slate-800 flex items-center justify-between">
               <span className="flex items-center gap-1.5">
                 <Mic className="w-4 h-4 text-emerald-600" />
-                المعلق الصوتي:
+                المعلق الصوتي (اللهجة والأسلوب):
               </span>
               <span className="text-[10px] text-slate-400 font-medium">دارجة V3</span>
             </label>
 
-            {/* Top 2 AI Voices */}
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
@@ -512,7 +635,7 @@ export default function StudioPage() {
               >
                 <div>
                   <div className="text-xs font-bold text-slate-900">سارة (Sarah)</div>
-                  <div className="text-[10px] text-slate-500">صوت أنثوي حيوي</div>
+                  <div className="text-[10px] text-slate-500">حيوية ومقنعة جداً</div>
                 </div>
                 {voiceCategory === "ai" && voice === "sarah" && (
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -533,7 +656,7 @@ export default function StudioPage() {
               >
                 <div>
                   <div className="text-xs font-bold text-slate-900">وليد (Walid)</div>
-                  <div className="text-[10px] text-slate-500">صوت رجالي إعلاني</div>
+                  <div className="text-[10px] text-slate-500">إعلاني حماسي وقوي</div>
                 </div>
                 {voiceCategory === "ai" && voice === "walid" && (
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -541,7 +664,6 @@ export default function StudioPage() {
               </button>
             </div>
 
-            {/* Dedicated "Your Voice" expandable toggle */}
             <div className="pt-1">
               <button
                 type="button"
@@ -567,7 +689,6 @@ export default function StudioPage() {
                 {voiceCategory === "custom" && <CheckCircle2 className="w-4 h-4 text-emerald-600" />}
               </button>
 
-              {/* Sub-options for custom voice: Record OR Upload */}
               {voiceCategory === "custom" && (
                 <div className="mt-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
                   {!isRecordingMic ? (
@@ -606,7 +727,6 @@ export default function StudioPage() {
             </div>
           </div>
 
-          {/* Compact Horizontal Grid for Product Images (Up to 4) */}
           <div className="bg-white rounded-2xl border border-slate-200 p-3.5 shadow-xs space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-slate-800 flex items-center gap-1">
@@ -641,7 +761,7 @@ export default function StudioPage() {
           </div>
         </section>
 
-        {/* 2. CENTER COLUMN: Script & Audio Mix */}
+        {/* 2. CENTER COLUMN: Hooks, Script & Audio Mix */}
         <section className={`lg:col-span-5 flex flex-col space-y-3.5 ${activeTab === "script" ? "flex" : "hidden lg:flex"}`}>
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-3.5 sm:p-5 flex flex-col justify-between min-h-[460px] lg:min-h-[520px]">
             <div className="space-y-3 overflow-y-auto max-h-[60vh] lg:max-h-[460px] pl-1">
@@ -649,14 +769,24 @@ export default function StudioPage() {
                 <div className="space-y-3">
                   {scriptData && (
                     <>
+                      {scriptData.hook && (
+                        <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-1">
+                          <div className="flex items-center gap-1.5 text-xs font-black text-amber-700">
+                            <Flame className="w-4 h-4 text-amber-600 fill-amber-500" />
+                            <span>الهوك الافتتاحي (أول ثانيتين لجلب المشاهدات):</span>
+                          </div>
+                          <p className="text-xs font-bold text-amber-900 leading-relaxed">{scriptData.hook}</p>
+                        </div>
+                      )}
+
                       <div className="p-3.5 sm:p-4 rounded-2xl bg-emerald-50/70 border border-emerald-200 space-y-2">
                         <div className="flex items-center justify-between text-[11px] font-bold text-emerald-800">
                           <span className="flex items-center gap-1.5">
                             <Volume2 className="w-3.5 h-3.5 text-emerald-600" />
-                            السكريبت الإعلاني (7-9 ثوانٍ):
+                            السكريبت الإعلاني (8 ثوانٍ):
                           </span>
                           <span className="text-[10px] bg-white px-2 py-0.5 rounded-full border border-emerald-300 font-semibold">
-                            تجاري
+                            UGC Viral
                           </span>
                         </div>
                         <p className="text-sm font-bold leading-relaxed text-slate-900">{scriptData.script}</p>
@@ -665,21 +795,20 @@ export default function StudioPage() {
                       <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
                         <span className="text-[11px] font-bold text-slate-600 flex items-center gap-1.5">
                           <Video className="w-3.5 h-3.5 text-slate-500" />
-                          المشهد وحركة الكاميرا:
+                          المشهد الإبداعي وحركة المنتج:
                         </span>
                         <p className="text-xs text-slate-600 leading-relaxed">{scriptData.visualPromptAr}</p>
                       </div>
 
-                      {scriptData.sfxPrompt && (
-                        <div className="p-2.5 rounded-xl bg-amber-50/80 border border-amber-200 text-[11px] text-amber-900 flex items-center gap-2">
-                          <Music className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                          <span className="truncate font-medium">المؤثر الصوتي: {scriptData.sfxPrompt}</span>
+                      {scriptData.onScreenText && (
+                        <div className="p-2.5 rounded-xl bg-indigo-50/80 border border-indigo-200 text-[11px] text-indigo-900 flex items-center gap-2">
+                          <span className="font-black bg-indigo-600 text-white px-2 py-0.5 rounded-md text-[10px]">Caption</span>
+                          <span className="truncate font-medium">{scriptData.onScreenText}</span>
                         </div>
                       )}
                     </>
                   )}
 
-                  {/* Audio Generation */}
                   {!previewAudioUrl ? (
                     <div className="space-y-1.5">
                       <button
@@ -691,7 +820,7 @@ export default function StudioPage() {
                         {loadingAudio ? (
                           <>
                             <Loader2 className="w-4 h-4 animate-spin" />
-                            <span>جاري توليد ودمج الصوت...</span>
+                            <span>جاري توليد ودمج الصوت والمؤثرات...</span>
                           </>
                         ) : (
                           <>
@@ -706,7 +835,7 @@ export default function StudioPage() {
                       <div className="flex items-center justify-between text-[11px] font-bold text-emerald-900">
                         <span className="flex items-center gap-1.5">
                           <Volume2 className="w-4 h-4 text-emerald-600" />
-                          معاينة الصوت الكامل ({audioPreviewCount}/2 معاينات مستهلكة):
+                          معاينة الصوت الكامل والمؤثرات:
                         </span>
                         {audioPreviewCount < 2 && (
                           <button
@@ -742,7 +871,6 @@ export default function StudioPage() {
                     </div>
                   )}
 
-                  {/* Render Final Video Button */}
                   <button
                     type="button"
                     disabled={isRendering || !previewAudioUrl}
@@ -752,12 +880,12 @@ export default function StudioPage() {
                     {isRendering ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        <span className="truncate">{renderStatus || "جاري إنتاج الفيديو..."}</span>
+                        <span className="truncate">{renderStatus || "جاري إنتاج الفيديو الإعلاني..."}</span>
                       </>
                     ) : (
                       <>
                         <Sparkles className="w-4 h-4" />
-                        <span>تأكيد وبدء توليد الفيديو النهائي (1 كريدي)</span>
+                        <span>تأكيد وبدء توليد الفيديو النهائي 8s (1 كريدي)</span>
                       </>
                     )}
                   </button>
@@ -767,15 +895,14 @@ export default function StudioPage() {
                   <div className="w-12 h-12 rounded-full bg-slate-50 flex items-center justify-center text-slate-300">
                     <Sparkles className="w-6 h-6" />
                   </div>
-                  <p className="text-xs font-bold text-slate-600">الاستوديو جاهز للبدء</p>
+                  <p className="text-xs font-bold text-slate-600">صانع الإعلانات الإبداعية جاهز</p>
                   <p className="text-[11px] text-slate-400 max-w-xs">
-                    ارفع صور السلعة من قسم الإعدادات، واكتب وصف العرض بالأسفل لإنشاء السكريبت ومعاينة الصوت مجاناً.
+                    ارفع صور السلعة، واكتب تفاصيل العرض بالأسفل لإنشاء أقوى هوك وسيناريو إعلاني تيك توك.
                   </p>
                 </div>
               )}
             </div>
 
-            {/* Input / Chat with Gemini */}
             <div className="pt-3 border-t border-slate-100 flex items-center gap-2">
               <input
                 type="text"
@@ -784,8 +911,8 @@ export default function StudioPage() {
                 onKeyDown={(e) => e.key === "Enter" && handleGenerateScript()}
                 placeholder={
                   scriptData
-                    ? "ناقش أو عدّل السكريبت مع Gemini..."
-                    : "اكتب تفاصيل السلعة (مثال: سيروم طبيعي للوجه وترطيب)..."
+                    ? "ناقش أو اطلب تغيير زاوية التصوير مع Gemini..."
+                    : "اكتب السلعة (مثال: سيروم للوجه ترطيب ونضارة فائقة)..."
                 }
                 className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs outline-none focus:border-emerald-600 focus:bg-white text-right"
               />
@@ -801,7 +928,7 @@ export default function StudioPage() {
           </div>
         </section>
 
-        {/* 3. RIGHT COLUMN: Phone Mockup Preview */}
+        {/* 3. RIGHT COLUMN: Phone Mockup Preview with Synchronized Video + Audio */}
         <section className={`lg:col-span-4 flex flex-col items-center justify-center ${activeTab === "preview" ? "flex" : "hidden lg:flex"}`}>
           <div className="relative w-full max-w-[280px] sm:max-w-[300px] lg:max-w-[310px] aspect-[9/18] max-h-[72vh] bg-black rounded-[38px] sm:rounded-[42px] p-2.5 shadow-2xl border-[4px] sm:border-[5px] border-slate-800 ring-1 ring-slate-900/40 flex flex-col justify-between overflow-hidden">
             <div className="absolute top-3 left-1/2 -translate-x-1/2 w-20 h-3.5 bg-slate-900 rounded-full z-30 flex items-center justify-center">
@@ -810,12 +937,48 @@ export default function StudioPage() {
 
             <div className="relative w-full h-full rounded-[30px] sm:rounded-[32px] overflow-hidden bg-slate-950 flex flex-col justify-between">
               {finalVideoUrl ? (
-                <video src={finalVideoUrl} controls autoPlay loop playsInline className="absolute inset-0 w-full h-full object-cover" />
+                <div 
+                  className="absolute inset-0 w-full h-full cursor-pointer group"
+                  onClick={toggleVideoPlaybackWithAudio}
+                >
+                  <video
+                    ref={previewVideoRef}
+                    src={finalVideoUrl}
+                    loop
+                    playsInline
+                    onTimeUpdate={() => {
+                      const vid = previewVideoRef.current;
+                      if (!vid || !isPlayingAudio) return;
+
+                      if (voiceAudioRef.current && Math.abs(voiceAudioRef.current.currentTime - vid.currentTime) > 0.3) {
+                        voiceAudioRef.current.currentTime = vid.currentTime;
+                      }
+                      if (sfxAudioRef.current && Math.abs(sfxAudioRef.current.currentTime - vid.currentTime) > 0.3) {
+                        sfxAudioRef.current.currentTime = vid.currentTime;
+                      }
+                    }}
+                    onEnded={() => {
+                      voiceAudioRef.current?.pause();
+                      sfxAudioRef.current?.pause();
+                      setIsPlayingAudio(false);
+                    }}
+                    className="w-full h-full object-cover"
+                  />
+
+                  {/* Tap-to-Play overlay unlocking audio */}
+                  {!isPlayingAudio && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/40 z-30 transition-opacity">
+                      <div className="w-14 h-14 rounded-full bg-emerald-600/90 text-white flex items-center justify-center shadow-lg border border-white/20">
+                        <Play className="w-7 h-7 fill-white translate-x-0.5" />
+                      </div>
+                    </div>
+                  )}
+                </div>
               ) : isRendering ? (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950 p-6 text-center space-y-3 z-30">
                   <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
                   <p className="text-xs font-bold text-white">{renderStatus}</p>
-                  <p className="text-[10px] text-slate-400">لا تغلق الصفحة، جاري العمل...</p>
+                  <p className="text-[10px] text-slate-400">جاري الإخراج السينمائي للسلعة (8 ثوانٍ)...</p>
                 </div>
               ) : productImages[0] ? (
                 <div className="absolute inset-0 w-full h-full">
@@ -826,27 +989,35 @@ export default function StudioPage() {
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 p-6 text-center">
                   <UploadCloud className="w-8 h-8 mb-2 opacity-30 text-white" />
                   <p className="text-xs font-bold text-slate-400">معاينة الهاتف (9:16)</p>
-                  <p className="text-[10px] text-slate-600 mt-1">ستظهر صورة السلعة والفيديو هنا</p>
+                  <p className="text-[10px] text-slate-600 mt-1">ستظهر لقطات الإعلان هنا</p>
                 </div>
               )}
 
-              <div className="relative z-20 pt-4 px-3 flex items-center justify-between text-[10px] text-white/90">
-                <span className="bg-black/40 backdrop-blur-md px-2 py-0.5 rounded-full font-mono text-[9px]">10s Preview</span>
-                <span className="bg-emerald-600 text-white font-bold px-2 py-0.5 rounded-full text-[9px]">Reels</span>
+              {scriptData?.onScreenText && (
+                <div className="absolute top-16 inset-x-3 z-20 flex justify-center pointer-events-none">
+                  <span className="bg-red-600 text-white font-black text-[11px] px-3 py-1 rounded-full shadow-lg border border-white/20 animate-bounce">
+                    {scriptData.onScreenText}
+                  </span>
+                </div>
+              )}
+
+              <div className="relative z-20 pt-4 px-3 flex items-center justify-between text-[10px] text-white/90 pointer-events-none">
+                <span className="bg-black/40 backdrop-blur-md px-2 py-0.5 rounded-full font-mono text-[9px]">UGC 8s</span>
+                <span className="bg-emerald-600 text-white font-bold px-2 py-0.5 rounded-full text-[9px]">HD 9:16</span>
               </div>
 
-              <div className="relative z-20 self-end px-2 flex flex-col items-center gap-3 text-white pb-8">
+              <div className="relative z-20 self-end px-2 flex flex-col items-center gap-3 text-white pb-8 pointer-events-none">
                 <div className="flex flex-col items-center gap-0.5">
                   <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center">
                     <Heart className="w-3.5 h-3.5 fill-white text-white" />
                   </div>
-                  <span className="text-[8px] font-bold">14.8k</span>
+                  <span className="text-[8px] font-bold">24.5k</span>
                 </div>
                 <div className="flex flex-col items-center gap-0.5">
                   <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center">
                     <MessageCircle className="w-3.5 h-3.5 text-white" />
                   </div>
-                  <span className="text-[8px] font-bold">512</span>
+                  <span className="text-[8px] font-bold">819</span>
                 </div>
                 <div className="flex flex-col items-center gap-0.5">
                   <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center">
@@ -856,43 +1027,49 @@ export default function StudioPage() {
                 </div>
               </div>
 
-              <div className="relative z-20 p-3 text-white space-y-1">
+              <div className="relative z-20 p-3 text-white space-y-1 pointer-events-none">
                 <span className="text-[11px] font-black block text-emerald-400">@ecommerce_dz</span>
                 <p className="text-[10px] sm:text-[11px] text-white/95 line-clamp-2 leading-relaxed">
-                  {scriptData?.script || (customAudioName ? `صوت خاص: ${customAudioName}` : "السكريبت سيظهر هنا مباشرة...")}
+                  {scriptData?.script || (customAudioName ? `صوت خاص: ${customAudioName}` : "السكريبت الإعلاني سيظهر هنا مباشرة...")}
                 </p>
                 <div className="flex items-center gap-1.5 text-[9px] text-white/70">
-                  <Music className="w-3 h-3 text-emerald-400 animate-spin" />
-                  <span className="truncate">لهجة • صوت طبيعي</span>
+                  <Music className="w-3.5 h-3.5 text-emerald-400 animate-spin" />
+                  <span className="truncate">صوت إعلاني أصلي • دارجة</span>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Download Button */}
+          {/* Merged Video Download Button */}
           {finalVideoUrl && (
-            <a
-              href={finalVideoUrl}
-              download="ugc-ad-dz.mp4"
-              target="_blank"
-              rel="noreferrer"
-              className="mt-3 w-full max-w-[280px] sm:max-w-[300px] lg:max-w-[310px] py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-sm transition-all"
+            <button
+              type="button"
+              disabled={isExportingVideo}
+              onClick={handleDownloadMergedVideo}
+              className="mt-3 w-full max-w-[280px] sm:max-w-[300px] lg:max-w-[310px] py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-sm transition-all disabled:opacity-50 cursor-pointer"
             >
-              <Download className="w-4 h-4" />
-              <span>تحميل الفيديو (MP4)</span>
-            </a>
+              {isExportingVideo ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>جاري دمج الصوت وحفظ الفيديو...</span>
+                </>
+              ) : (
+                <>
+                  <Download className="w-4 h-4" />
+                  <span>تحميل الفيديو مدمج بالصوت (MP4)</span>
+                </>
+              )}
+            </button>
           )}
         </section>
       </main>
 
-      {/* Commercial Zero-Credit Paywall Popup */}
       <BaridiMobModal
         isOpen={showPaywallModal}
         onClose={() => setShowPaywallModal(false)}
         selectedPackAmount="3,900"
       />
 
-      {/* Mobile Glassmorphic Bottom Tab Navigation */}
       <nav className="lg:hidden fixed bottom-3 inset-x-3 z-50 bg-white/95 backdrop-blur-lg border border-slate-200/80 rounded-2xl px-3 py-1.5 flex items-center justify-around shadow-lg">
         <button
           type="button"

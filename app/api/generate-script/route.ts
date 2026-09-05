@@ -53,9 +53,9 @@ export async function POST(req: Request) {
           text: formattedScript,
           model_id: "eleven_v3",
           voice_settings: {
-            stability: 0.45,
-            similarity_boost: 0.75,
-            style: 0.15,
+            stability: 0.5,
+            similarity_boost: 0.5,
+            style: 0,
             use_speaker_boost: true,
           },
         }),
@@ -139,7 +139,7 @@ export async function POST(req: Request) {
       promptParts.push({ text: `تفاصيل وطلب المستخدم: ${JSON.stringify(rawList)}` });
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" });
     const result = await model.generateContent(promptParts);
 
     let resText = result.response.text().trim();

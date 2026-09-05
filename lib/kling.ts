@@ -23,18 +23,19 @@ export async function generateKlingUGCVideo(
     formattedImageUrl = `data:image/jpeg;base64,${imageUrl}`;
   }
 
+  // Pure dynamic commercial direction without restrictive face-to-camera templates
   const optimizedPrompt = `${prompt}. Cinematic 9:16 vertical commercial video, dynamic product showcase, commercial studio lighting, smooth professional camera movement`;
 
-  // Comprehensive negative prompt eliminating video artifacts, glitches, and rendering errors
   const negativePrompt =
     "glitch, video artifacts, digital noise, rendering errors, visual stutter, frame drop, screen tear, compression artifacts, chromatic aberration, flickering, flashing, ghosting, blurry, out of focus, low resolution, pixelated, 3d render look, cartoonish, oversaturated, deformed geometry, warped objects, melting surfaces, morphing shapes, floating detached items, bad anatomy, mutated hands, deformed fingers, extra limbs, severed limbs, unnatural motion, jerky camera movements, abrupt transitions, talking to camera, mouth speaking, moving lips, speech animation, watermark, logo overlay, timestamp, subtitle text, low quality, amateur footage";
 
+  // Updated to '8s' for full 8-second Veo 3.1 generation
   const result = await fal.queue.submit("fal-ai/veo3.1/lite/image-to-video", {
     input: {
       prompt: optimizedPrompt,
       negative_prompt: negativePrompt,
       image_url: formattedImageUrl,
-      duration: "6s",
+      duration: "8s",
       aspect_ratio: "9:16",
       resolution: "720p",
       generate_audio: false,
