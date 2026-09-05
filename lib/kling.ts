@@ -6,7 +6,7 @@ const MODEL_ID = "fal-ai/veo3.1/lite/image-to-video";
 export async function generateKlingUGCVideo(
   prompt: string,
   imageUrl: string,
-  isFemaleVoice: boolean = true
+  _isFemaleVoice: boolean = true
 ): Promise<string> {
   const falKey = process.env.FAL_KEY;
   if (!falKey) {
@@ -26,34 +26,21 @@ export async function generateKlingUGCVideo(
     formattedImageUrl = `data:image/jpeg;base64,${imageUrl}`;
   }
 
-  const avatarRules = isFemaleVoice
-    ? "beautiful clean face, elegant modest clothing, fully covering respectful outfit"
-    : "handsome clean face, well-groomed, elegant respectful clothing";
-
-  // Stronger creative direction — encourage variation, not exact image copy
-const optimizedPrompt = `${prompt}. 
-Vertical 9:16 commercial UGC video. 
-Use the product from the reference image but create a clean and realistic scene. 
-Show natural and logical product interaction only (for example: carefully opening the box, taking a piece with a spoon or hand, showing the texture). 
-Do NOT invent messy or impossible actions. 
-Product must stay clean and recognizable. 
-Subject never speaks or moves lips. 
-Smooth intentional camera, authentic energy, high quality. 
-${avatarRules}`;
+  // Pure user / client prompt passed directly to Veo
+  const optimizedPrompt = prompt;
 
   const negativePrompt =
-  
-  "talking, moving lips, speaking mouth, lip-sync, mouth open, speaking, " +
-  "exact copy of input image, static image, frozen frame, " +
-  "spoon going through closed lid, cover still attached while opening, " +
-  "chocolate spilling everywhere, messy chocolate all over the box, " +
-  "person putting mouth directly into product, licking, biting the box, " +
-  "unrealistic product handling, broken physics, " +
-  "revealing clothes, exposed skin, low cut, cleavage, unmodest, " +
-  "dirty skin, acne, blemishes, facial distortion, morphing, " +
-  "blurry product, distorted logo, changing logo, bad anatomy, " +
-  "deformed fingers, extra limbs, shaky camera, low resolution, " +
-  "glitch, artifacts, jerky motion, text overlay, watermark";
+    "talking, moving lips, speaking mouth, lip-sync, mouth open, speaking, " +
+    "exact copy of input image, static image, frozen frame, " +
+    "spoon going through closed lid, cover still attached while opening, " +
+    "chocolate spilling everywhere, messy chocolate all over the box, " +
+    "person putting mouth directly into product, licking, biting the box, " +
+    "unrealistic product handling, broken physics, " +
+    "revealing clothes, exposed skin, low cut, cleavage, unmodest, " +
+    "dirty skin, acne, blemishes, facial distortion, morphing, " +
+    "blurry product, distorted logo, changing logo, bad anatomy, " +
+    "deformed fingers, extra limbs, shaky camera, low resolution, " +
+    "glitch, artifacts, jerky motion, text overlay, watermark";
 
   const result = await fal.queue.submit(MODEL_ID, {
     input: {
