@@ -61,6 +61,7 @@ export async function generateKlingUGCVideo(
     throw new Error(`fal.ai Veo Error (${response.status}): ${errorMsg}`);
   }
 
+  // fal.ai returns request_id
   return data.request_id;
 }
 
@@ -77,8 +78,8 @@ export async function checkKlingTaskStatus(
     throw new Error("Missing FAL_KEY in environment variables");
   }
 
-  // Universal Fal queue status endpoint
-  const statusUrl = `https://queue.fal.run/fal-ai/veo3.1/lite/image-to-video/requests/${taskId}/status`;
+  // Universal fal queue endpoints (No model prefix to avoid HTTP 405)
+  const statusUrl = `https://queue.fal.run/requests/${taskId}/status`;
 
   const response = await fetch(statusUrl, {
     method: "GET",
@@ -96,36 +97,7 @@ export async function checkKlingTaskStatus(
     return { status: "processing" };
   }
 
-  // If status returns 405 or 404, fall back directly to the result endpoint
   if (!response.ok) {
-    if (response.status === 405 || response.status === 404) {
-      const directUrl = `https://queue.fal.run/fal-ai/veo3.1/lite/image-to-video/requests/${taskId}`;
-      const directRes = await fetch(directUrl, {
-        method: "GET",
-        headers: {
-          Authorization: `Key ${falKey}`,
-          Accept: "application/json",
-        },
-      });
-      const directText = await directRes.text();
-      let directData: any = {};
-      try {
-        directData = directText ? JSON.parse(directText) : {};
-      } catch {
-        return { status: "processing" };
-      }
-
-      const fallbackVideo =
-        directData.video?.url ||
-        directData.output?.video?.url ||
-        directData.output?.url ||
-        directData.video_url;
-
-      if (fallbackVideo) {
-        return { status: "succeed", videoUrl: fallbackVideo };
-      }
-    }
-
     return {
       status: "failed",
       error: statusData.detail || `Status check returned HTTP ${response.status}`,
@@ -133,7 +105,7 @@ export async function checkKlingTaskStatus(
   }
 
   if (statusData.status === "COMPLETED") {
-    // 1. Direct embed in status response
+    // Check if result URL is embedded directly
     const directUrl =
       statusData.video?.url ||
       statusData.output?.video?.url ||
@@ -144,8 +116,8 @@ export async function checkKlingTaskStatus(
       return { status: "succeed", videoUrl: directUrl };
     }
 
-    // 2. Fetch full result
-    const resultUrl = `https://queue.fal.run/fal-ai/veo3.1/lite/image-to-video/requests/${taskId}`;
+    // Fetch output from the universal result endpoint
+    const resultUrl = `https://queue.fal.run/requests/${taskId}`;
     const resResponse = await fetch(resultUrl, {
       method: "GET",
       headers: {
@@ -159,7 +131,7 @@ export async function checkKlingTaskStatus(
     try {
       resData = resText ? JSON.parse(resText) : {};
     } catch {
-      return { status: "failed", error: "Failed to parse fal result JSON" };
+      return { status: "failed", error: "Failed to parse fal result payload" };
     }
 
     const videoUrl =
@@ -172,7 +144,7 @@ export async function checkKlingTaskStatus(
       return { status: "succeed", videoUrl };
     }
 
-    return { status: "failed", error: "Video URL not found in fal.ai result" };
+    return { status: "failed", error: "Video URL not found in completed result" };
   }
 
   if (statusData.status === "IN_PROGRESS") {
