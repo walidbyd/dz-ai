@@ -35,6 +35,7 @@ export async function generateKlingUGCVideo(
     headers: {
       Authorization: `Key ${falKey}`,
       "Content-Type": "application/json",
+      Accept: "application/json",
     },
     body: JSON.stringify({
       prompt: optimizedPrompt,
@@ -67,7 +68,7 @@ export async function checkKlingTaskStatus(
   taskId: string,
   _type?: string
 ): Promise<{
-  status: "submitted" | "processing" | "succeed" | "videoUrl" | "failed";
+  status: "submitted" | "processing" | "succeed" | "failed";
   videoUrl?: string;
   error?: string;
 }> {
@@ -76,11 +77,15 @@ export async function checkKlingTaskStatus(
     throw new Error("Missing FAL_KEY in environment variables");
   }
 
+  // Universal Fal queue status endpoint
   const statusUrl = `https://queue.fal.run/fal-ai/veo3.1/lite/image-to-video/requests/${taskId}/status`;
 
   const response = await fetch(statusUrl, {
     method: "GET",
-    headers: { Authorization: `Key ${falKey}` },
+    headers: {
+      Authorization: `Key ${falKey}`,
+      Accept: "application/json",
+    },
   });
 
   const statusText = await response.text();
@@ -91,15 +96,44 @@ export async function checkKlingTaskStatus(
     return { status: "processing" };
   }
 
+  // If status returns 405 or 404, fall back directly to the result endpoint
   if (!response.ok) {
+    if (response.status === 405 || response.status === 404) {
+      const directUrl = `https://queue.fal.run/fal-ai/veo3.1/lite/image-to-video/requests/${taskId}`;
+      const directRes = await fetch(directUrl, {
+        method: "GET",
+        headers: {
+          Authorization: `Key ${falKey}`,
+          Accept: "application/json",
+        },
+      });
+      const directText = await directRes.text();
+      let directData: any = {};
+      try {
+        directData = directText ? JSON.parse(directText) : {};
+      } catch {
+        return { status: "processing" };
+      }
+
+      const fallbackVideo =
+        directData.video?.url ||
+        directData.output?.video?.url ||
+        directData.output?.url ||
+        directData.video_url;
+
+      if (fallbackVideo) {
+        return { status: "succeed", videoUrl: fallbackVideo };
+      }
+    }
+
     return {
       status: "failed",
-      error: statusData.detail || `Failed to check task status (${response.status})`,
+      error: statusData.detail || `Status check returned HTTP ${response.status}`,
     };
   }
 
   if (statusData.status === "COMPLETED") {
-    // 1. Check if video URL is already present in status object
+    // 1. Direct embed in status response
     const directUrl =
       statusData.video?.url ||
       statusData.output?.video?.url ||
@@ -113,7 +147,11 @@ export async function checkKlingTaskStatus(
     // 2. Fetch full result
     const resultUrl = `https://queue.fal.run/fal-ai/veo3.1/lite/image-to-video/requests/${taskId}`;
     const resResponse = await fetch(resultUrl, {
-      headers: { Authorization: `Key ${falKey}` },
+      method: "GET",
+      headers: {
+        Authorization: `Key ${falKey}`,
+        Accept: "application/json",
+      },
     });
 
     const resText = await resResponse.text();
@@ -121,7 +159,7 @@ export async function checkKlingTaskStatus(
     try {
       resData = resText ? JSON.parse(resText) : {};
     } catch {
-      return { status: "failed", error: "Invalid JSON response from fal.ai result" };
+      return { status: "failed", error: "Failed to parse fal result JSON" };
     }
 
     const videoUrl =
