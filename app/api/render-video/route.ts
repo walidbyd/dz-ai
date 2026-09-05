@@ -51,7 +51,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const { visualPromptEn, productImageUrl, voice } = await req.json();
+    const { visualPromptEn, productImageUrl } = await req.json();
 
     if (!productImageUrl) {
       return NextResponse.json(
@@ -62,13 +62,12 @@ export async function POST(req: Request) {
 
     const prompt =
       visualPromptEn ||
-      "Dynamic Algerian UGC creator product showcase, 9:16 vertical video, commercial lighting";
-
-    const isFemaleVoice = voice !== "walid";
+      "Dynamic creative commercial product showcase, 9:16 vertical video";
 
     console.log("Submitting job to fal.ai Veo 3.1 Lite with prompt:", prompt);
 
-    const taskId = await generateKlingUGCVideo(prompt, productImageUrl, isFemaleVoice);
+    // Call with exactly 2 arguments matching lib/kling.ts
+    const taskId = await generateKlingUGCVideo(prompt, productImageUrl);
 
     try {
       await supabase
