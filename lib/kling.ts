@@ -78,8 +78,10 @@ export async function checkKlingTaskStatus(
     throw new Error("Missing FAL_KEY in environment variables");
   }
 
-  // Uses the model base path (fal-ai/veo3.1/lite) for queue status
-  const statusUrl = `https://queue.fal.run/${QUEUE_BASE_MODEL_ID}/requests/${taskId}/status`;
+  // FULL endpoint ID is required (including /image-to-video)
+  const MODEL_ID = "fal-ai/veo3.1/lite/image-to-video";
+
+  const statusUrl = `https://queue.fal.run/${MODEL_ID}/requests/${taskId}/status`;
 
   const response = await fetch(statusUrl, {
     method: "GET",
@@ -105,7 +107,7 @@ export async function checkKlingTaskStatus(
   }
 
   if (statusData.status === "COMPLETED") {
-    // 1. Direct URL if embedded
+    // Try to get video URL from status payload first
     const directUrl =
       statusData.video?.url ||
       statusData.output?.video?.url ||
@@ -116,8 +118,8 @@ export async function checkKlingTaskStatus(
       return { status: "succeed", videoUrl: directUrl };
     }
 
-    // 2. Fetch result using model base path
-    const resultUrl = `https://queue.fal.run/${QUEUE_BASE_MODEL_ID}/requests/${taskId}`;
+    // Otherwise fetch the result
+    const resultUrl = `https://queue.fal.run/${MODEL_ID}/requests/${taskId}`;
     const resResponse = await fetch(resultUrl, {
       method: "GET",
       headers: {
@@ -157,6 +159,6 @@ export async function checkKlingTaskStatus(
 
   return {
     status: "failed",
-    error: statusData.error || "Generation failed on fal.ai",
+    error: statusData.error || statusData.detail || "Generation failed on fal.ai",
   };
 }
