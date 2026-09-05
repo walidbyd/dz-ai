@@ -134,7 +134,7 @@ export async function POST(req: Request) {
       promptParts.push({ text: `تفاصيل المستخدم: ${JSON.stringify(rawList)}` });
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
+    const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
     const result = await model.generateContent(promptParts);
 
     let resText = result.response.text().trim();
