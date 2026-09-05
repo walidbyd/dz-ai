@@ -1,6 +1,7 @@
 // lib/kling.ts
 
-const VEO_LITE_URL = "https://queue.fal.run/fal-ai/veo3.1/lite/image-to-video";
+const SUBMIT_URL = "https://queue.fal.run/fal-ai/veo3.1/lite/image-to-video";
+const QUEUE_BASE_MODEL_ID = "fal-ai/veo3.1/lite";
 
 export async function generateKlingUGCVideo(
   prompt: string,
@@ -30,7 +31,7 @@ export async function generateKlingUGCVideo(
   const negativePrompt =
     "talking, moving lips, speaking mouth, lip-sync, revealing clothes, exposed skin, low cut, unmodest, immodest, cleavage, dirty skin, acne, blemishes, facial distortion, morphing, blurry text, distorted product label, changing logo, bad anatomy, deformed fingers, extra limbs, shaky camera, low resolution, glitch, artifacts, jerky motion";
 
-  const response = await fetch(VEO_LITE_URL, {
+  const response = await fetch(SUBMIT_URL, {
     method: "POST",
     headers: {
       Authorization: `Key ${falKey}`,
@@ -61,7 +62,6 @@ export async function generateKlingUGCVideo(
     throw new Error(`fal.ai Veo Error (${response.status}): ${errorMsg}`);
   }
 
-  // fal.ai returns request_id
   return data.request_id;
 }
 
@@ -78,8 +78,8 @@ export async function checkKlingTaskStatus(
     throw new Error("Missing FAL_KEY in environment variables");
   }
 
-  // Universal fal queue endpoints (No model prefix to avoid HTTP 405)
-  const statusUrl = `https://queue.fal.run/requests/${taskId}/status`;
+  // Uses the model base path (fal-ai/veo3.1/lite) for queue status
+  const statusUrl = `https://queue.fal.run/${QUEUE_BASE_MODEL_ID}/requests/${taskId}/status`;
 
   const response = await fetch(statusUrl, {
     method: "GET",
@@ -105,7 +105,7 @@ export async function checkKlingTaskStatus(
   }
 
   if (statusData.status === "COMPLETED") {
-    // Check if result URL is embedded directly
+    // 1. Direct URL if embedded
     const directUrl =
       statusData.video?.url ||
       statusData.output?.video?.url ||
@@ -116,8 +116,8 @@ export async function checkKlingTaskStatus(
       return { status: "succeed", videoUrl: directUrl };
     }
 
-    // Fetch output from the universal result endpoint
-    const resultUrl = `https://queue.fal.run/requests/${taskId}`;
+    // 2. Fetch result using model base path
+    const resultUrl = `https://queue.fal.run/${QUEUE_BASE_MODEL_ID}/requests/${taskId}`;
     const resResponse = await fetch(resultUrl, {
       method: "GET",
       headers: {
@@ -155,5 +155,8 @@ export async function checkKlingTaskStatus(
     return { status: "submitted" };
   }
 
-  return { status: "failed", error: statusData.error || "Generation failed on fal.ai" };
+  return {
+    status: "failed",
+    error: statusData.error || "Generation failed on fal.ai",
+  };
 }
