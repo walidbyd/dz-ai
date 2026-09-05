@@ -1,18 +1,17 @@
 // lib/kling.ts
-import { fal } from "@fal-ai/client";
+
+const SUBMIT_URL = "https://queue.fal.run/fal-ai/veo3.1/lite/image-to-video";
+const MODEL_ID = "fal-ai/veo3.1/lite/image-to-video";
 
 export async function generateKlingUGCVideo(
   prompt: string,
-  imageUrl: string
+  imageUrl: string,
+  isFemaleVoice: boolean = true
 ): Promise<string> {
   const falKey = process.env.FAL_KEY;
   if (!falKey) {
     throw new Error("Missing FAL_KEY in environment variables");
   }
-
-  fal.config({
-    credentials: falKey,
-  });
 
   let formattedImageUrl = imageUrl;
   if (
@@ -23,25 +22,59 @@ export async function generateKlingUGCVideo(
     formattedImageUrl = `data:image/jpeg;base64,${imageUrl}`;
   }
 
-  // Enforce kinetic motion, fast camera sweeping, and light changes to prevent static renders
-  const optimizedPrompt = `${prompt}. Dynamic 9:16 vertical commercial advertisement, fast sweeping camera movement, dramatic lighting change, professional product interaction, highly engaging commercial b-roll, high cinematic motion`;
+  const avatarRules = isFemaleVoice
+    ? "beautiful clean face, elegant modest clothing, fully covering respectful outfit"
+    : "handsome clean face, well-groomed, elegant respectful clothing";
+
+  // Stronger creative direction — encourage variation, not exact image copy
+  const optimizedPrompt = `${prompt}. 
+Vertical 9:16 commercial UGC video. 
+Use the product from the reference image but create a more creative and dynamic scene — do not just animate the exact uploaded photo. 
+Subject never speaks or moves lips. 
+Natural authentic movement, product stays clear and recognizable, smooth intentional camera, high quality commercial look. 
+${avatarRules}`;
 
   const negativePrompt =
-    "static image, frozen frame, still photo, motionless picture, slideshow, camera zoom on still image, lack of movement, glitch, video artifacts, digital noise, rendering errors, visual stutter, frame drop, screen tear, compression artifacts, chromatic aberration, flickering, flashing, ghosting, blurry, out of focus, low resolution, pixelated, 3d render look, cartoonish, deformed geometry, warped objects, melting surfaces, morphing shapes, floating detached items, bad anatomy, mutated hands, deformed fingers, extra limbs, talking to camera, mouth speaking, watermark, logo overlay, timestamp, subtitle text";
+    "talking, moving lips, speaking mouth, lip-sync, mouth open, speaking, " +
+    "exact copy of input image, static image, frozen frame, no motion, " +
+    "revealing clothes, exposed skin, low cut, cleavage, unmodest, " +
+    "dirty skin, acne, blemishes, facial distortion, morphing, " +
+    "blurry product, distorted logo, changing logo, bad anatomy, " +
+    "deformed fingers, extra limbs, shaky camera, low resolution, " +
+    "glitch, artifacts, jerky motion, text overlay, watermark";
 
-  const result = await fal.queue.submit("fal-ai/veo3.1/lite/image-to-video", {
-    input: {
+  const response = await fetch(SUBMIT_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Key ${falKey}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({
       prompt: optimizedPrompt,
       negative_prompt: negativePrompt,
       image_url: formattedImageUrl,
-      duration: "8s",
+      duration: "8s",          // you asked for 8 seconds
       aspect_ratio: "9:16",
       resolution: "720p",
-      generate_audio: false,
-    },
+      generate_audio: false,   // silent video
+    }),
   });
 
-  return result.request_id;
+  const text = await response.text();
+  let data: any = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`fal.ai returned invalid response: ${text.slice(0, 100)}`);
+  }
+
+  if (!response.ok) {
+    const errorMsg = data.detail || data.message || text;
+    throw new Error(`fal.ai Veo Error (${response.status}): ${errorMsg}`);
+  }
+
+  return data.request_id;
 }
 
 export async function checkKlingTaskStatus(
@@ -57,49 +90,77 @@ export async function checkKlingTaskStatus(
     throw new Error("Missing FAL_KEY in environment variables");
   }
 
-  fal.config({
-    credentials: falKey,
+  const statusUrl = `https://queue.fal.run/${MODEL_ID}/requests/${taskId}/status`;
+
+  const response = await fetch(statusUrl, {
+    method: "GET",
+    headers: {
+      Authorization: `Key ${falKey}`,
+      Accept: "application/json",
+    },
   });
 
+  const statusText = await response.text();
+  let statusData: any = {};
   try {
-    const status = await fal.queue.status("fal-ai/veo3.1/lite/image-to-video", {
-      requestId: taskId,
-      logs: false,
-    });
+    statusData = statusText ? JSON.parse(statusText) : {};
+  } catch {
+    return { status: "processing" };
+  }
 
-    if (status.status === "COMPLETED") {
-      const result: any = await fal.queue.result("fal-ai/veo3.1/lite/image-to-video", {
-        requestId: taskId,
-      });
-
-      const videoUrl =
-        result.data?.video?.url ||
-        result.data?.output?.video?.url ||
-        result.data?.output?.url ||
-        result.video?.url ||
-        result.data?.video_url;
-
-      if (videoUrl) {
-        return { status: "succeed", videoUrl };
-      }
-
-      return { status: "failed", error: "Video URL not found in fal.ai output" };
-    }
-
-    if (status.status === "IN_PROGRESS") {
-      return { status: "processing" };
-    }
-
-    if (status.status === "IN_QUEUE") {
-      return { status: "submitted" };
-    }
-
-    return { status: "failed", error: "Generation failed on fal.ai" };
-  } catch (error: any) {
-    console.error("fal client error:", error);
+  if (!response.ok) {
     return {
       status: "failed",
-      error: error.message || "Failed to check status",
+      error: statusData.detail || `Status check returned HTTP ${response.status}`,
     };
   }
+
+  if (statusData.status === "COMPLETED") {
+    const directUrl =
+      statusData.video?.url ||
+      statusData.output?.video?.url ||
+      statusData.output?.url ||
+      statusData.video_url;
+
+    if (directUrl) {
+      return { status: "succeed", videoUrl: directUrl };
+    }
+
+    const resultUrl = `https://queue.fal.run/${MODEL_ID}/requests/${taskId}`;
+    const resResponse = await fetch(resultUrl, {
+      method: "GET",
+      headers: {
+        Authorization: `Key ${falKey}`,
+        Accept: "application/json",
+      },
+    });
+
+    const resText = await resResponse.text();
+    let resData: any = {};
+    try {
+      resData = resText ? JSON.parse(resText) : {};
+    } catch {
+      return { status: "failed", error: "Failed to parse fal result payload" };
+    }
+
+    const videoUrl =
+      resData.video?.url ||
+      resData.output?.video?.url ||
+      resData.output?.url ||
+      resData.video_url;
+
+    if (videoUrl) {
+      return { status: "succeed", videoUrl };
+    }
+
+    return { status: "failed", error: "Video URL not found in completed result" };
+  }
+
+  if (statusData.status === "IN_PROGRESS") return { status: "processing" };
+  if (statusData.status === "IN_QUEUE") return { status: "submitted" };
+
+  return {
+    status: "failed",
+    error: statusData.error || statusData.detail || "Generation failed on fal.ai",
+  };
 }
