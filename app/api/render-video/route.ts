@@ -1,3 +1,4 @@
+// app/api/render-video/route.ts
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
@@ -5,7 +6,6 @@ import { generateKlingUGCVideo, checkKlingTaskStatus } from "@/lib/kling";
 
 export async function POST(req: Request) {
   try {
-    // 1. Authenticate user from session cookies[cite: 10]
     const cookieStore = await cookies();
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -38,7 +38,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // 2. Check current credits balance[cite: 10]
     const { data: profile, error: profileErr } = await supabase
       .from("profiles")
       .select("credits")
@@ -52,7 +51,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const { visualPromptEn, productImageUrl } = await req.json();
+    const { visualPromptEn, productImageUrl, voice } = await req.json();
 
     if (!productImageUrl) {
       return NextResponse.json(
@@ -65,12 +64,12 @@ export async function POST(req: Request) {
       visualPromptEn ||
       "Dynamic Algerian UGC creator product showcase, 9:16 vertical video, commercial lighting";
 
+    const isFemaleVoice = voice !== "walid";
+
     console.log("Submitting job to fal.ai Veo 3.1 Lite with prompt:", prompt);
 
-    // 3. Trigger generation via fal.ai Veo 3.1 Lite (hasAvatar = false)
-    const taskId = await generateKlingUGCVideo(prompt, productImageUrl, false);
+    const taskId = await generateKlingUGCVideo(prompt, productImageUrl, isFemaleVoice);
 
-    // 4. Safely decrement 1 credit in Supabase[cite: 10]
     try {
       await supabase
         .from("profiles")
@@ -90,9 +89,6 @@ export async function POST(req: Request) {
   }
 }
 
-/**
- * Poll task status (GET /api/render-video?taskId=xxx)
- */
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);

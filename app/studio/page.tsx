@@ -1,3 +1,4 @@
+// app/studio/page.tsx
 "use client";
 
 import { useState, useRef, useEffect } from "react";
@@ -29,6 +30,7 @@ import {
   Plus,
   Trash2,
   ShoppingBag,
+  Download,
 } from "lucide-react";
 import Link from "next/link";
 import { BaridiMobModal } from "@/components/BaridiMobModal";
@@ -92,6 +94,7 @@ export default function StudioPage() {
   const [finalVideoUrl, setFinalVideoUrl] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showPaywallModal, setShowPaywallModal] = useState<boolean>(false);
+  const isSubmittingRef = useRef(false);
 
   // Fetch real user session & credits on initial mount
   useEffect(() => {
@@ -123,7 +126,48 @@ export default function StudioPage() {
       }
     }
     fetchUserProfile();
+
+    // Auto-resume polling if page was refreshed during generation
+    const savedTaskId = localStorage.getItem("active_render_task_id");
+    if (savedTaskId) {
+      setIsRendering(true);
+      setRenderStatus("جاري استرجاع ومعالجة الفيديو...");
+      setActiveTab("preview");
+      pollTask(savedTaskId);
+    }
   }, []);
+
+  const pollTask = (taskId: string) => {
+    const pollInterval = setInterval(async () => {
+      try {
+        const pollRes = await fetch(`/api/render-video?taskId=${taskId}`);
+        const rawText = await pollRes.text();
+
+        let pollData: any = {};
+        try {
+          pollData = rawText ? JSON.parse(rawText) : {};
+        } catch {
+          return;
+        }
+
+        if (pollData.status === "succeed" && pollData.videoUrl) {
+          clearInterval(pollInterval);
+          localStorage.removeItem("active_render_task_id");
+          setFinalVideoUrl(pollData.videoUrl);
+          setIsRendering(false);
+          setRenderStatus("");
+          setActiveTab("preview");
+        } else if (pollData.status === "failed") {
+          clearInterval(pollInterval);
+          localStorage.removeItem("active_render_task_id");
+          setIsRendering(false);
+          setErrorMsg(`فشل التوليد: ${pollData.error || "خطأ غير معروف"}`);
+        }
+      } catch (pollErr) {
+        console.warn("Polling network blip, retrying next tick...", pollErr);
+      }
+    }, 5000);
+  };
 
   // Multi-image file uploader (Max 4)
   const handleProductImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -236,8 +280,7 @@ export default function StudioPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: newMessages,
-          voice: voice === "custom" ? "walid" : voice,
-          videoMode: "VOICEOVER",
+          voice: voice === "custom" ? "sarah" : voice,
           productImage: productImages[0],
         }),
       });
@@ -284,7 +327,7 @@ export default function StudioPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           onlyAudio: true,
-          voice: voice === "custom" ? "walid" : voice,
+          voice: voice === "custom" ? "sarah" : voice,
           script: scriptData?.script || "إعلان ترويجي",
           sfxPrompt: scriptData?.sfxPrompt,
         }),
@@ -331,22 +374,25 @@ export default function StudioPage() {
     }
   };
 
-  // Video Rendering using Veo 3.1 Lite - Handles Empty/Non-JSON Blips Safely
+  // Video Rendering using Veo 3.1 Lite - Safe multi-submission lock
   const handleRenderFinalVideo = async () => {
+    if (isSubmittingRef.current || isRendering) return;
+
     if (!previewAudioUrl) {
       setErrorMsg("يرجى اختيار، تسجيل أو رفع الصوت أولاً!");
       return;
     }
 
-    // Paywall trigger: No credits -> Prompt commercial offer modal
     if (credits <= 0) {
       setShowPaywallModal(true);
       return;
     }
 
+    isSubmittingRef.current = true;
     setIsRendering(true);
     setErrorMsg(null);
     setRenderStatus("جارٍ إطلاق مهمة الفيديو عبر Veo 3.1 Lite...");
+    setActiveTab("preview");
 
     try {
       const res = await fetch("/api/render-video", {
@@ -357,6 +403,7 @@ export default function StudioPage() {
           visualPromptEn:
             scriptData?.visualPromptEn || "Dynamic Algerian UGC creator product showcase, 9:16 vertical video",
           productImageUrl: productImages[0],
+          voice,
         }),
       });
 
@@ -364,41 +411,17 @@ export default function StudioPage() {
       if (!res.ok || !data.taskId) throw new Error(data.error || "فشل إطلاق عملية الرندر");
 
       const taskId = data.taskId;
-      setRenderStatus("تم إرسال الطلب! جاري توليد وتحريك الفيديو (1-2 دقيقة)...");
+      localStorage.setItem("active_render_task_id", taskId);
+      setCredits((prev) => Math.max(0, prev - 1));
+      setRenderStatus("تم إرسال الطلب بنجاح! جاري توليد الفيديو (1-2 دقيقة)...");
 
-      const pollInterval = setInterval(async () => {
-        try {
-          const pollRes = await fetch(`/api/render-video?taskId=${taskId}`);
-          const rawText = await pollRes.text();
-
-          let pollData: any = {};
-          try {
-            pollData = rawText ? JSON.parse(rawText) : {};
-          } catch {
-            console.warn("Retrying poll request next tick...");
-            return;
-          }
-
-          if (pollData.status === "succeed" && pollData.videoUrl) {
-            clearInterval(pollInterval);
-            setFinalVideoUrl(pollData.videoUrl);
-            setCredits((prev) => Math.max(0, prev - 1));
-            setIsRendering(false);
-            setRenderStatus("");
-            setActiveTab("preview");
-          } else if (pollData.status === "failed") {
-            clearInterval(pollInterval);
-            setIsRendering(false);
-            setErrorMsg(`فشل التوليد: ${pollData.error || "خطأ غير معروف"}`);
-          }
-        } catch (pollErr) {
-          console.warn("Polling network blip, retrying next tick...", pollErr);
-        }
-      }, 5000);
+      pollTask(taskId);
     } catch (err: any) {
       setErrorMsg(err.message);
       setIsRendering(false);
       setRenderStatus("");
+    } finally {
+      isSubmittingRef.current = false;
     }
   };
 
@@ -463,7 +486,7 @@ export default function StudioPage() {
         {/* 1. LEFT COLUMN: Setup & Uploads */}
         <section className={`lg:col-span-3 space-y-3.5 ${activeTab === "settings" ? "block" : "hidden lg:block"}`}>
           
-          {/* Voice Hierarchy: 1) Sarah / Walid, 2) Your Voice (Expands to Mic / Upload) */}
+          {/* Voice Hierarchy */}
           <div className="bg-white rounded-2xl border border-slate-200 p-3.5 shadow-xs space-y-3">
             <label className="text-xs font-bold text-slate-800 flex items-center justify-between">
               <span className="flex items-center gap-1.5">
@@ -618,7 +641,7 @@ export default function StudioPage() {
           </div>
         </section>
 
-        {/* 2. CENTER COLUMN: Script & Audio Mix with 2-Preview Capping */}
+        {/* 2. CENTER COLUMN: Script & Audio Mix */}
         <section className={`lg:col-span-5 flex flex-col space-y-3.5 ${activeTab === "script" ? "flex" : "hidden lg:flex"}`}>
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-3.5 sm:p-5 flex flex-col justify-between min-h-[460px] lg:min-h-[520px]">
             <div className="space-y-3 overflow-y-auto max-h-[60vh] lg:max-h-[460px] pl-1">
@@ -656,7 +679,7 @@ export default function StudioPage() {
                     </>
                   )}
 
-                  {/* Audio Generation with 2-Preview Enforcement */}
+                  {/* Audio Generation */}
                   {!previewAudioUrl ? (
                     <div className="space-y-1.5">
                       <button
@@ -762,7 +785,7 @@ export default function StudioPage() {
                 placeholder={
                   scriptData
                     ? "ناقش أو عدّل السكريبت مع Gemini..."
-                    : "اكتب تفاصيل السلعة (مثال: شيبس كرانشي قرمشة بنينة)..."
+                    : "اكتب تفاصيل السلعة (مثال: سيروم طبيعي للوجه وترطيب)..."
                 }
                 className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs outline-none focus:border-emerald-600 focus:bg-white text-right"
               />
@@ -788,6 +811,12 @@ export default function StudioPage() {
             <div className="relative w-full h-full rounded-[30px] sm:rounded-[32px] overflow-hidden bg-slate-950 flex flex-col justify-between">
               {finalVideoUrl ? (
                 <video src={finalVideoUrl} controls autoPlay loop playsInline className="absolute inset-0 w-full h-full object-cover" />
+              ) : isRendering ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950 p-6 text-center space-y-3 z-30">
+                  <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
+                  <p className="text-xs font-bold text-white">{renderStatus}</p>
+                  <p className="text-[10px] text-slate-400">لا تغلق الصفحة، جاري العمل...</p>
+                </div>
               ) : productImages[0] ? (
                 <div className="absolute inset-0 w-full h-full">
                   <img src={productImages[0]} alt="Preview Canvas" className="w-full h-full object-cover" />
@@ -833,12 +862,26 @@ export default function StudioPage() {
                   {scriptData?.script || (customAudioName ? `صوت خاص: ${customAudioName}` : "السكريبت سيظهر هنا مباشرة...")}
                 </p>
                 <div className="flex items-center gap-1.5 text-[9px] text-white/70">
-                  <Music className="w-3.5 h-3.5 text-emerald-400 animate-spin" />
+                  <Music className="w-3 h-3 text-emerald-400 animate-spin" />
                   <span className="truncate">لهجة • صوت طبيعي</span>
                 </div>
               </div>
             </div>
           </div>
+
+          {/* Download Button */}
+          {finalVideoUrl && (
+            <a
+              href={finalVideoUrl}
+              download="ugc-ad-dz.mp4"
+              target="_blank"
+              rel="noreferrer"
+              className="mt-3 w-full max-w-[280px] sm:max-w-[300px] lg:max-w-[310px] py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-sm transition-all"
+            >
+              <Download className="w-4 h-4" />
+              <span>تحميل الفيديو (MP4)</span>
+            </a>
+          )}
         </section>
       </main>
 

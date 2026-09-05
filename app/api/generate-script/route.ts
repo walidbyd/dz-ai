@@ -7,7 +7,6 @@ import crypto from "crypto";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
-// In-memory cache for processed images: { [hash]: { inlineData: { data, mimeType } } }
 const imagePartCache = new Map<string, { inlineData: { data: string; mimeType: string } }>();
 
 function getImageHash(urlOrBase64: string): string {
@@ -19,18 +18,14 @@ export async function POST(req: Request) {
     const body = await req.json();
     const {
       messages,
-      voice,
-      videoMode = "LIPSYNC",
+      voice = "sarah",
       onlyAudio,
       script,
       sfxPrompt,
       productImage,
-      avatarImage,
     } = body;
 
-    // =========================================================================
-    // 1. ELEVENLABS V3 AUDIO + SFX PREVIEW
-    // =========================================================================
+    // 1. ELEVENLABS AUDIO + SFX
     if (onlyAudio) {
       const apiKey = process.env.ELEVENLABS_API_KEY;
       if (!apiKey) {
@@ -46,7 +41,7 @@ export async function POST(req: Request) {
         ? script.trim()
         : `[excited, fast, cheerful] ${script.trim()}`;
 
-      console.log("🎙️ 1. Generating ElevenLabs Speech for:", voiceId);
+      console.log("🎙️ Generating ElevenLabs Speech for:", voiceId);
       const ttsPromise = fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
         method: "POST",
         headers: {
@@ -71,25 +66,20 @@ export async function POST(req: Request) {
         return Buffer.from(await res.arrayBuffer());
       });
 
-      // 2. Generate SFX using sanitized prompt
       let sfxErrorMessage: string | null = null;
       const rawPrompt =
-        sfxPrompt || "Crisp potato chips snack bag opening rip, loud satisfying crunchy bites";
+        sfxPrompt || "Crisp product package unboxing, satisfying subtle whoosh and sparkle ding";
       const sfxPromise = generateElevenLabsSFX(rawPrompt, 4).catch((err: any) => {
         sfxErrorMessage = err.message || "SFX Generation failed";
-        console.error("⚠️ SFX Generation Error Caught:", sfxErrorMessage);
         return null;
       });
 
       const [voiceBuffer, sfxBuffer] = await Promise.all([ttsPromise, sfxPromise]);
 
-      const base64Voice = voiceBuffer.toString("base64");
-      const base64Sfx = sfxBuffer ? sfxBuffer.toString("base64") : null;
-
       return NextResponse.json({
         success: true,
-        audioUrl: `data:audio/mpeg;base64,${base64Voice}`,
-        sfxUrl: base64Sfx ? `data:audio/mpeg;base64,${base64Sfx}` : null,
+        audioUrl: `data:audio/mpeg;base64,${voiceBuffer.toString("base64")}`,
+        sfxUrl: sfxBuffer ? `data:audio/mpeg;base64,${sfxBuffer.toString("base64")}` : null,
         sfxError: sfxErrorMessage,
       });
     }
@@ -102,17 +92,13 @@ export async function POST(req: Request) {
       });
     }
 
-    // Cached image converter
     async function urlToGenerativePartCached(url: string) {
       const hash = getImageHash(url);
       if (imagePartCache.has(hash)) {
-        console.log("⚡ [Cache Hit] Reusing cached image part for hash:", hash.substring(0, 10));
         return imagePartCache.get(hash)!;
       }
 
-      console.log("📦 [Cache Miss] Processing new image part...");
       let part: { inlineData: { data: string; mimeType: string } };
-
       if (url.startsWith("data:")) {
         const [header, base64Data] = url.split(",");
         const mimeType = header.split(";")[0].replace("data:", "");
@@ -132,19 +118,23 @@ export async function POST(req: Request) {
       return part;
     }
 
-    // Pass the isolated, permanently locked system prompt
-    const promptParts: any[] = [LOCKED_SYSTEM_PROMPT];
-    promptParts.push(await urlToGenerativePartCached(productImage));
-    if (avatarImage) {
-      promptParts.push(await urlToGenerativePartCached(avatarImage));
-    }
+    const voiceContext =
+      voice === "sarah"
+        ? "VOICE GENDER: FEMALE (Sarah). The script MUST be spoken by a sweet, vibrant Algerian woman to other women/customers. If an avatar/model appears in visualPromptEn, she MUST be an extremely beautiful Algerian woman with a spotless, clean face, and wearing modest, fully covered, respectful clothing (ساتر ومحترم)."
+        : "VOICE GENDER: MALE (Walid). The script MUST be spoken by an energetic Algerian man. If an avatar/model appears, he MUST be a handsome, clean-shaven or neatly groomed man in respectful, stylish attire.";
+
+    const promptParts: any[] = [
+      LOCKED_SYSTEM_PROMPT,
+      { text: voiceContext },
+      await urlToGenerativePartCached(productImage),
+    ];
 
     const rawList = (messages || []).filter((m: any) => m.content && m.content.trim().length > 0);
     if (rawList.length > 0) {
       promptParts.push({ text: `تفاصيل المستخدم: ${JSON.stringify(rawList)}` });
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
     const result = await model.generateContent(promptParts);
 
     let resText = result.response.text().trim();
@@ -161,7 +151,7 @@ export async function POST(req: Request) {
       script: parsed.script,
       visualPromptAr: parsed.visualPromptAr,
       visualPromptEn: parsed.visualPromptEn,
-      sfxPrompt: parsed.sfxPrompt || "Crisp potato chips snack bag opening rip, loud satisfying crunchy bites",
+      sfxPrompt: parsed.sfxPrompt || "Crisp satisfying clean click and sparkle bell",
     });
   } catch (error: any) {
     console.error("Script generation error:", error);
