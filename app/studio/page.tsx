@@ -608,7 +608,7 @@ export default function StudioPage() {
     isSubmittingRef.current = true;
     setIsRendering(true);
     setErrorMsg(null);
-    setRenderStatus("جارٍ إطلاق مهمة الفيديو الإبداعية عبر Veo 3.1 Lite (8 ثوانٍ)...");
+    setRenderStatus("جارٍ إطلاق مهمة الفيديو الإبداعية  (8 ثوانٍ)...");
     setActiveTab("preview");
 
     try {

@@ -31,21 +31,29 @@ export async function generateKlingUGCVideo(
     : "handsome clean face, well-groomed, elegant respectful clothing";
 
   // Stronger creative direction — encourage variation, not exact image copy
-  const optimizedPrompt = `${prompt}. 
+const optimizedPrompt = `${prompt}. 
 Vertical 9:16 commercial UGC video. 
-Use the product from the reference image but create a more creative and dynamic scene — do not just animate the exact uploaded photo. 
+Use the product from the reference image but create a clean and realistic scene. 
+Show natural and logical product interaction only (for example: carefully opening the box, taking a piece with a spoon or hand, showing the texture). 
+Do NOT invent messy or impossible actions. 
+Product must stay clean and recognizable. 
 Subject never speaks or moves lips. 
-Natural authentic movement, product stays clear and recognizable, smooth intentional camera, high quality commercial look. 
+Smooth intentional camera, authentic energy, high quality. 
 ${avatarRules}`;
 
   const negativePrompt =
-    "talking, moving lips, speaking mouth, lip-sync, mouth open, speaking, " +
-    "exact copy of input image, static image, frozen frame, no motion, " +
-    "revealing clothes, exposed skin, low cut, cleavage, unmodest, " +
-    "dirty skin, acne, blemishes, facial distortion, morphing, " +
-    "blurry product, distorted logo, changing logo, bad anatomy, " +
-    "deformed fingers, extra limbs, shaky camera, low resolution, " +
-    "glitch, artifacts, jerky motion, text overlay, watermark";
+  
+  "talking, moving lips, speaking mouth, lip-sync, mouth open, speaking, " +
+  "exact copy of input image, static image, frozen frame, " +
+  "spoon going through closed lid, cover still attached while opening, " +
+  "chocolate spilling everywhere, messy chocolate all over the box, " +
+  "person putting mouth directly into product, licking, biting the box, " +
+  "unrealistic product handling, broken physics, " +
+  "revealing clothes, exposed skin, low cut, cleavage, unmodest, " +
+  "dirty skin, acne, blemishes, facial distortion, morphing, " +
+  "blurry product, distorted logo, changing logo, bad anatomy, " +
+  "deformed fingers, extra limbs, shaky camera, low resolution, " +
+  "glitch, artifacts, jerky motion, text overlay, watermark";
 
   const result = await fal.queue.submit(MODEL_ID, {
     input: {
