@@ -5,7 +5,7 @@ import { generateKlingUGCVideo, checkKlingTaskStatus } from "@/lib/kling";
 
 export async function POST(req: Request) {
   try {
-    // 1. Authenticate user from session cookies
+    // 1. Authenticate user from session cookies[cite: 10]
     const cookieStore = await cookies();
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -38,7 +38,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // 2. Check current credits balance
+    // 2. Check current credits balance[cite: 10]
     const { data: profile, error: profileErr } = await supabase
       .from("profiles")
       .select("credits")
@@ -52,12 +52,11 @@ export async function POST(req: Request) {
       );
     }
 
-    const { visualPromptEn, productImageUrl, avatarImageUrl } = await req.json();
+    const { visualPromptEn, productImageUrl } = await req.json();
 
-    const imageInput = avatarImageUrl || productImageUrl;
-    if (!imageInput) {
+    if (!productImageUrl) {
       return NextResponse.json(
-        { error: "صورة المنتج أو الموديل مطلوبة لتوليد الفيديو." },
+        { error: "صورة المنتج مطلوبة لتوليد الفيديو." },
         { status: 400 }
       );
     }
@@ -66,12 +65,12 @@ export async function POST(req: Request) {
       visualPromptEn ||
       "Dynamic Algerian UGC creator product showcase, 9:16 vertical video, commercial lighting";
 
-    console.log("Submitting job to fal.ai Kling 2.6 with prompt:", prompt);
-    
-    // 3. Trigger generation via fal.ai
-    const taskId = await generateKlingUGCVideo(prompt, imageInput);
+    console.log("Submitting job to fal.ai Veo 3.1 Lite with prompt:", prompt);
 
-    // 4. Safely decrement 1 credit in Supabase
+    // 3. Trigger generation via fal.ai Veo 3.1 Lite (hasAvatar = false)
+    const taskId = await generateKlingUGCVideo(prompt, productImageUrl, false);
+
+    // 4. Safely decrement 1 credit in Supabase[cite: 10]
     try {
       await supabase
         .from("profiles")
@@ -104,12 +103,12 @@ export async function GET(req: Request) {
     }
 
     const result = await checkKlingTaskStatus(taskId);
-    return NextResponse.json(result);
+    return NextResponse.json(result ?? { status: "processing" });
   } catch (error: any) {
     console.error("Poll Render Error:", error);
     return NextResponse.json(
-      { status: "failed", error: error.message || "Failed to check task status" },
-      { status: 500 }
+      { status: "processing", warning: error.message || "Poll temporary issue" },
+      { status: 200 }
     );
   }
 }

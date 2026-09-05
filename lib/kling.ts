@@ -1,52 +1,71 @@
 // lib/kling.ts
 
-const FAL_BASE_URL = "https://queue.fal.run/fal-ai/kling-video/v2.6/pro/image-to-video";
+const VEO_LITE_URL = "https://queue.fal.run/fal-ai/veo3.1/lite/image-to-video";
 
-/**
- * Initiates an Image-to-Video generation task on Kling 2.6 via fal.ai REST API.
- * Uses native fetch — zero extra npm packages needed!
- */
 export async function generateKlingUGCVideo(
   prompt: string,
-  imageUrl: string
+  imageUrl: string,
+  hasAvatar: boolean = false
 ): Promise<string> {
   const falKey = process.env.FAL_KEY;
   if (!falKey) {
     throw new Error("Missing FAL_KEY in environment variables");
   }
 
-  const response = await fetch(FAL_BASE_URL, {
+  let formattedImageUrl = imageUrl;
+  if (
+    !imageUrl.startsWith("http://") &&
+    !imageUrl.startsWith("https://") &&
+    !imageUrl.startsWith("data:")
+  ) {
+    formattedImageUrl = `data:image/jpeg;base64,${imageUrl}`;
+  }
+
+  const optimizedPrompt = `${prompt}. Cinematic commercial product showcase b-roll, 9:16 vertical video, subject does not speak to camera, dynamic smooth camera movements, studio commercial lighting`;
+
+  const baseNegative =
+    "talking, moving lips, speaking mouth, lip-sync, morphing, blurry text, distorted product label, changing logo, bad anatomy, deformed fingers, extra limbs, shaky camera, low resolution, glitch, artifacts, jerky motion";
+
+  const negativePrompt = hasAvatar
+    ? `${baseNegative}, unnatural facial expressions, double faces, cartoonish skin`
+    : `${baseNegative}, random humans, random faces, floating objects, warped geometry`;
+
+  const response = await fetch(VEO_LITE_URL, {
     method: "POST",
     headers: {
       Authorization: `Key ${falKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      prompt,
-      start_image_url: imageUrl,
-      duration: "5",
+      prompt: optimizedPrompt,
+      negative_prompt: negativePrompt,
+      image_url: formattedImageUrl,
+      duration: "6s",
       aspect_ratio: "9:16",
+      resolution: "720p",
       generate_audio: false,
     }),
   });
 
-  const data = await response.json();
+  const text = await response.text();
+  let data: any = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`fal.ai returned invalid response: ${text.slice(0, 100)}`);
+  }
 
   if (!response.ok) {
-    const errorMsg = data.detail || data.message || JSON.stringify(data);
-    throw new Error(`fal.ai Error (${response.status}): ${errorMsg}`);
+    const errorMsg = data.detail || data.message || text;
+    throw new Error(`fal.ai Veo Error (${response.status}): ${errorMsg}`);
   }
 
   return data.request_id;
 }
 
-/**
- * Checks the status of an ongoing fal.ai Kling task.
- * Returns { status, videoUrl }
- */
 export async function checkKlingTaskStatus(
   taskId: string,
-  type: "image2video" | "lipsync" = "image2video"
+  _type?: string
 ): Promise<{
   status: "submitted" | "processing" | "succeed" | "failed";
   videoUrl?: string;
@@ -57,7 +76,7 @@ export async function checkKlingTaskStatus(
     throw new Error("Missing FAL_KEY in environment variables");
   }
 
-  const statusUrl = `https://queue.fal.run/fal-ai/kling-video/v2.6/pro/image-to-video/requests/${taskId}/status`;
+  const statusUrl = `https://queue.fal.run/fal-ai/veo3.1/lite/image-to-video/requests/${taskId}/status`;
 
   const response = await fetch(statusUrl, {
     method: "GET",
@@ -66,24 +85,47 @@ export async function checkKlingTaskStatus(
     },
   });
 
-  const data = await response.json();
+  const statusText = await response.text();
+  let data: any = {};
+  try {
+    data = statusText ? JSON.parse(statusText) : {};
+  } catch {
+    // If fal.ai is briefly unreachable or returned HTML gateway timeout, treat as processing
+    return { status: "processing" };
+  }
 
   if (!response.ok) {
     return {
       status: "failed",
-      error: data.detail || "Failed to check task status on fal.ai",
+      error: data.detail || `Failed to check task status (${response.status})`,
     };
   }
 
   if (data.status === "COMPLETED") {
-    // Fetch result
-    const resultUrl = `https://queue.fal.run/fal-ai/kling-video/v2.6/pro/image-to-video/requests/${taskId}`;
+    // Veo 3.1 on fal.ai often returns the result directly in the status object or output
+    if (data.video?.url || data.output?.url) {
+      return { status: "succeed", videoUrl: data.video?.url || data.output?.url };
+    }
+
+    // Fetch result if not embedded
+    const resultUrl = `https://queue.fal.run/fal-ai/veo3.1/lite/image-to-video/requests/${taskId}`;
     const resResponse = await fetch(resultUrl, {
       headers: { Authorization: `Key ${falKey}` },
     });
-    const resData = await resResponse.json();
+
+    const resText = await resResponse.text();
+    let resData: any = {};
+    try {
+      resData = resText ? JSON.parse(resText) : {};
+    } catch {
+      return { status: "failed", error: "Invalid JSON response from fal.ai result" };
+    }
+
     const videoUrl = resData.video?.url || resData.output?.url;
-    return { status: "succeed", videoUrl };
+    if (videoUrl) {
+      return { status: "succeed", videoUrl };
+    }
+    return { status: "failed", error: "Video URL not found in result" };
   }
 
   if (data.status === "IN_PROGRESS") {
@@ -94,5 +136,5 @@ export async function checkKlingTaskStatus(
     return { status: "submitted" };
   }
 
-  return { status: "failed", error: "Generation failed on fal.ai" };
+  return { status: "failed", error: data.error || "Generation failed on fal.ai" };
 }

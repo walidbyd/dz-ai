@@ -6,7 +6,6 @@ import {
   Mic,
   Video,
   Volume2,
-  UserCheck,
   Sparkles,
   Play,
   Pause,
@@ -51,10 +50,8 @@ export default function StudioPage() {
   // Studio UI states
   const [activeTab, setActiveTab] = useState<"preview" | "script" | "settings">("settings");
 
-  // Multi-Image & Model states (Horizontal Grid up to 4 images)
+  // Product Images State (Horizontal Grid up to 4 images)
   const [productImages, setProductImages] = useState<string[]>([]);
-  const [avatarImage, setAvatarImage] = useState<string | null>(null);
-  const [videoMode, setVideoMode] = useState<"LIPSYNC" | "VOICEOVER">("LIPSYNC");
 
   // Voice Selection State
   const [voiceCategory, setVoiceCategory] = useState<"ai" | "custom">("ai");
@@ -152,15 +149,6 @@ export default function StudioPage() {
     setProductImages((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => setAvatarImage(reader.result as string);
-      reader.readAsDataURL(file);
-    }
-  };
-
   // Custom Audio File Upload Handler
   const handleCustomAudioUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -249,9 +237,8 @@ export default function StudioPage() {
         body: JSON.stringify({
           messages: newMessages,
           voice: voice === "custom" ? "walid" : voice,
-          videoMode,
+          videoMode: "VOICEOVER",
           productImage: productImages[0],
-          avatarImage,
         }),
       });
 
@@ -344,7 +331,7 @@ export default function StudioPage() {
     }
   };
 
-  // Video Rendering using Kling - Triggers Paywall if credits <= 0
+  // Video Rendering using Veo 3.1 Lite - Handles Empty/Non-JSON Blips Safely
   const handleRenderFinalVideo = async () => {
     if (!previewAudioUrl) {
       setErrorMsg("يرجى اختيار، تسجيل أو رفع الصوت أولاً!");
@@ -359,7 +346,7 @@ export default function StudioPage() {
 
     setIsRendering(true);
     setErrorMsg(null);
-    setRenderStatus("جارٍ رفع الملفات وإطلاق مهمة الفيديو...");
+    setRenderStatus("جارٍ إطلاق مهمة الفيديو عبر Veo 3.1 Lite...");
 
     try {
       const res = await fetch("/api/render-video", {
@@ -370,8 +357,6 @@ export default function StudioPage() {
           visualPromptEn:
             scriptData?.visualPromptEn || "Dynamic Algerian UGC creator product showcase, 9:16 vertical video",
           productImageUrl: productImages[0],
-          avatarImageUrl: avatarImage,
-          videoMode,
         }),
       });
 
@@ -379,14 +364,22 @@ export default function StudioPage() {
       if (!res.ok || !data.taskId) throw new Error(data.error || "فشل إطلاق عملية الرندر");
 
       const taskId = data.taskId;
-      setRenderStatus("تم إرسال الطلب  ! جاري توليد وتحريك الفيديو (1-2 دقيقة)...");
+      setRenderStatus("تم إرسال الطلب! جاري توليد وتحريك الفيديو (1-2 دقيقة)...");
 
       const pollInterval = setInterval(async () => {
         try {
-          const pollRes = await fetch(`/api/render-video?taskId=${taskId}&type=image2video`);
-          const pollData = await pollRes.json();
+          const pollRes = await fetch(`/api/render-video?taskId=${taskId}`);
+          const rawText = await pollRes.text();
 
-          if (pollData.status === "succeed") {
+          let pollData: any = {};
+          try {
+            pollData = rawText ? JSON.parse(rawText) : {};
+          } catch {
+            console.warn("Retrying poll request next tick...");
+            return;
+          }
+
+          if (pollData.status === "succeed" && pollData.videoUrl) {
             clearInterval(pollInterval);
             setFinalVideoUrl(pollData.videoUrl);
             setCredits((prev) => Math.max(0, prev - 1));
@@ -399,7 +392,7 @@ export default function StudioPage() {
             setErrorMsg(`فشل التوليد: ${pollData.error || "خطأ غير معروف"}`);
           }
         } catch (pollErr) {
-          console.error("Polling error:", pollErr);
+          console.warn("Polling network blip, retrying next tick...", pollErr);
         }
       }, 5000);
     } catch (err: any) {
@@ -477,7 +470,7 @@ export default function StudioPage() {
                 <Mic className="w-4 h-4 text-emerald-600" />
                 المعلق الصوتي:
               </span>
-              <span className="text-[10px] text-slate-400 font-medium">دارجة  V3</span>
+              <span className="text-[10px] text-slate-400 font-medium">دارجة V3</span>
             </label>
 
             {/* Top 2 AI Voices */}
@@ -590,41 +583,6 @@ export default function StudioPage() {
             </div>
           </div>
 
-          {/* Presentation Mode */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-3.5 shadow-xs space-y-2">
-            <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-              <Video className="w-4 h-4 text-emerald-600" />
-              طريقة الإخراج:
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setVideoMode("LIPSYNC")}
-                className={`min-h-[40px] p-2 rounded-xl border text-right transition-all flex items-center justify-center ${
-                  videoMode === "LIPSYNC" ? "border-emerald-500 bg-emerald-50/60 ring-1 ring-emerald-500" : "border-slate-200 active:bg-slate-50"
-                }`}
-              >
-                <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                  <UserCheck className="w-4 h-4 text-emerald-600" />
-                  <span>Lip-Sync (موديل)</span>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setVideoMode("VOICEOVER")}
-                className={`min-h-[40px] p-2 rounded-xl border text-right transition-all flex items-center justify-center ${
-                  videoMode === "VOICEOVER" ? "border-emerald-500 bg-emerald-50/60 ring-1 ring-emerald-500" : "border-slate-200 active:bg-slate-50"
-                }`}
-              >
-                <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                  <Volume2 className="w-4 h-4 text-emerald-600" />
-                  <span>B-roll (صوت فقط)</span>
-                </div>
-              </button>
-            </div>
-          </div>
-
           {/* Compact Horizontal Grid for Product Images (Up to 4) */}
           <div className="bg-white rounded-2xl border border-slate-200 p-3.5 shadow-xs space-y-2">
             <div className="flex items-center justify-between">
@@ -657,23 +615,6 @@ export default function StudioPage() {
                 </label>
               )}
             </div>
-          </div>
-
-          {/* Dedicated Model/Avatar Image Slot */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-3 shadow-xs flex items-center justify-between">
-            <div>
-              <div className="text-xs font-bold text-slate-800">صورة الموديل (Lip-Sync):</div>
-              <div className="text-[10px] text-slate-400">وجه الموديل للتحدث بالفيديو</div>
-            </div>
-
-            <label className="w-14 h-14 rounded-xl overflow-hidden border-2 border-dashed border-slate-300 bg-slate-50 flex items-center justify-center cursor-pointer hover:border-emerald-500 transition-colors shrink-0">
-              {avatarImage ? (
-                <img src={avatarImage} alt="Avatar" className="w-full h-full object-cover" />
-              ) : (
-                <UploadCloud className="w-5 h-5 text-slate-400" />
-              )}
-              <input type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />
-            </label>
           </div>
         </section>
 
@@ -788,7 +729,7 @@ export default function StudioPage() {
                     {isRendering ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        <span className="truncate">{renderStatus || "جاري إنتاج الفيديو  ..."}</span>
+                        <span className="truncate">{renderStatus || "جاري إنتاج الفيديو..."}</span>
                       </>
                     ) : (
                       <>
@@ -892,8 +833,8 @@ export default function StudioPage() {
                   {scriptData?.script || (customAudioName ? `صوت خاص: ${customAudioName}` : "السكريبت سيظهر هنا مباشرة...")}
                 </p>
                 <div className="flex items-center gap-1.5 text-[9px] text-white/70">
-                  <Music className="w-3 h-3 text-emerald-400 animate-spin" />
-                  <span className="truncate">لهجة  • صوت طبيعي</span>
+                  <Music className="w-3.5 h-3.5 text-emerald-400 animate-spin" />
+                  <span className="truncate">لهجة • صوت طبيعي</span>
                 </div>
               </div>
             </div>
