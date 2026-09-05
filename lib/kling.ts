@@ -3,15 +3,13 @@ import { fal } from "@fal-ai/client";
 
 export async function generateKlingUGCVideo(
   prompt: string,
-  imageUrl: string,
-  isFemaleVoice: boolean = true
+  imageUrl: string
 ): Promise<string> {
   const falKey = process.env.FAL_KEY;
   if (!falKey) {
     throw new Error("Missing FAL_KEY in environment variables");
   }
 
-  // Configure fal credentials
   fal.config({
     credentials: falKey,
   });
@@ -25,14 +23,11 @@ export async function generateKlingUGCVideo(
     formattedImageUrl = `data:image/jpeg;base64,${imageUrl}`;
   }
 
-  const avatarEnforcement = isFemaleVoice
-    ? "If a female creator is shown: beautiful spotless clean face, elegant modest styling, fully covering respectful clothes, hijabi or elegant modest apparel"
-    : "If a male creator is shown: handsome spotless clean face, well-groomed, elegant respectful clothing";
+  const optimizedPrompt = `${prompt}. Cinematic 9:16 vertical commercial video, dynamic product showcase, commercial studio lighting, smooth professional camera movement`;
 
-  const optimizedPrompt = `${prompt}. Cinematic commercial product showcase b-roll, 9:16 vertical video, subject does not speak to camera, dynamic smooth camera movements, studio commercial lighting, ${avatarEnforcement}`;
-
+  // Comprehensive negative prompt eliminating video artifacts, glitches, and rendering errors
   const negativePrompt =
-    "talking, moving lips, speaking mouth, lip-sync, revealing clothes, exposed skin, low cut, unmodest, immodest, cleavage, dirty skin, acne, blemishes, facial distortion, morphing, blurry text, distorted product label, changing logo, bad anatomy, deformed fingers, extra limbs, shaky camera, low resolution, glitch, artifacts, jerky motion";
+    "glitch, video artifacts, digital noise, rendering errors, visual stutter, frame drop, screen tear, compression artifacts, chromatic aberration, flickering, flashing, ghosting, blurry, out of focus, low resolution, pixelated, 3d render look, cartoonish, oversaturated, deformed geometry, warped objects, melting surfaces, morphing shapes, floating detached items, bad anatomy, mutated hands, deformed fingers, extra limbs, severed limbs, unnatural motion, jerky camera movements, abrupt transitions, talking to camera, mouth speaking, moving lips, speech animation, watermark, logo overlay, timestamp, subtitle text, low quality, amateur footage";
 
   const result = await fal.queue.submit("fal-ai/veo3.1/lite/image-to-video", {
     input: {

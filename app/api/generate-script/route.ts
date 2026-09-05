@@ -25,7 +25,9 @@ export async function POST(req: Request) {
       productImage,
     } = body;
 
-    // 1. ELEVENLABS AUDIO + SFX
+    // =========================================================================
+    // 1. ELEVENLABS V3 AUDIO + SFX PREVIEW
+    // =========================================================================
     if (onlyAudio) {
       const apiKey = process.env.ELEVENLABS_API_KEY;
       if (!apiKey) {
@@ -37,11 +39,10 @@ export async function POST(req: Request) {
           ? process.env.MY_CUSTOM_VOICE_ID || "QnyUxHTDyrsvn6iC7qBT"
           : process.env.SARAH_VOICE_ID || "a8ByD1LhCNBSMqQ7xAvI";
 
-      const formattedScript = script.trim().startsWith("[")
-        ? script.trim()
-        : `[excited, fast, cheerful] ${script.trim()}`;
+      // Pass the text directly with Gemini's embedded ElevenLabs V3 pacing/emotion tags
+      const formattedScript = script?.trim() || "";
 
-      console.log("🎙️ Generating ElevenLabs Speech for:", voiceId);
+      console.log("🎙️ Generating ElevenLabs V3 Audio for:", voiceId);
       const ttsPromise = fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
         method: "POST",
         headers: {
@@ -52,9 +53,9 @@ export async function POST(req: Request) {
           text: formattedScript,
           model_id: "eleven_v3",
           voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.5,
-            style: 0.0,
+            stability: 0.45,
+            similarity_boost: 0.75,
+            style: 0.15,
             use_speaker_boost: true,
           },
         }),
@@ -68,9 +69,10 @@ export async function POST(req: Request) {
 
       let sfxErrorMessage: string | null = null;
       const rawPrompt =
-        sfxPrompt || "Crisp product package unboxing, satisfying subtle whoosh and sparkle ding";
+        sfxPrompt || "Crisp satisfying commercial sound effect, subtle sparkle whoosh";
       const sfxPromise = generateElevenLabsSFX(rawPrompt, 4).catch((err: any) => {
         sfxErrorMessage = err.message || "SFX Generation failed";
+        console.error("⚠️ SFX Generation Warning:", sfxErrorMessage);
         return null;
       });
 
@@ -84,6 +86,9 @@ export async function POST(req: Request) {
       });
     }
 
+    // =========================================================================
+    // 2. GEMINI PROMPT GENERATION
+    // =========================================================================
     if (!productImage) {
       return NextResponse.json({
         success: true,
@@ -118,23 +123,23 @@ export async function POST(req: Request) {
       return part;
     }
 
-    const voiceContext =
+    const voiceDirection =
       voice === "sarah"
-        ? "VOICE GENDER: FEMALE (Sarah). The script MUST be spoken by a sweet, vibrant Algerian woman to other women/customers. If an avatar/model appears in visualPromptEn, she MUST be an extremely beautiful Algerian woman with a spotless, clean face, and wearing modest, fully covered, respectful clothing (ساتر ومحترم)."
-        : "VOICE GENDER: MALE (Walid). The script MUST be spoken by an energetic Algerian man. If an avatar/model appears, he MUST be a handsome, clean-shaven or neatly groomed man in respectful, stylish attire.";
+        ? "VOICE GENDER: FEMALE (سارة). Deliver spontaneous, vibrant conversational Algerian Arabic."
+        : "VOICE GENDER: MALE (وليد). Deliver punchy, confident, energetic commercial Algerian Arabic.";
 
     const promptParts: any[] = [
       LOCKED_SYSTEM_PROMPT,
-      { text: voiceContext },
+      { text: voiceDirection },
       await urlToGenerativePartCached(productImage),
     ];
 
     const rawList = (messages || []).filter((m: any) => m.content && m.content.trim().length > 0);
     if (rawList.length > 0) {
-      promptParts.push({ text: `تفاصيل المستخدم: ${JSON.stringify(rawList)}` });
+      promptParts.push({ text: `تفاصيل وطلب المستخدم: ${JSON.stringify(rawList)}` });
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
     const result = await model.generateContent(promptParts);
 
     let resText = result.response.text().trim();
@@ -148,10 +153,12 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
+      hook: parsed.hook || "",
+      onScreenText: parsed.onScreenText || "",
       script: parsed.script,
       visualPromptAr: parsed.visualPromptAr,
       visualPromptEn: parsed.visualPromptEn,
-      sfxPrompt: parsed.sfxPrompt || "Crisp satisfying clean click and sparkle bell",
+      sfxPrompt: parsed.sfxPrompt || "Crisp satisfying clean commercial click and sparkle",
     });
   } catch (error: any) {
     console.error("Script generation error:", error);
