@@ -78,7 +78,7 @@ export async function checkKlingTaskStatus(
     throw new Error("Missing FAL_KEY in environment variables");
   }
 
-  // FULL endpoint ID is required (including /image-to-video)
+  // FULL endpoint ID is mandatory
   const MODEL_ID = "fal-ai/veo3.1/lite/image-to-video";
 
   const statusUrl = `https://queue.fal.run/${MODEL_ID}/requests/${taskId}/status`;
@@ -107,7 +107,6 @@ export async function checkKlingTaskStatus(
   }
 
   if (statusData.status === "COMPLETED") {
-    // Try to get video URL from status payload first
     const directUrl =
       statusData.video?.url ||
       statusData.output?.video?.url ||
@@ -118,7 +117,7 @@ export async function checkKlingTaskStatus(
       return { status: "succeed", videoUrl: directUrl };
     }
 
-    // Otherwise fetch the result
+    // Fetch the actual result
     const resultUrl = `https://queue.fal.run/${MODEL_ID}/requests/${taskId}`;
     const resResponse = await fetch(resultUrl, {
       method: "GET",
