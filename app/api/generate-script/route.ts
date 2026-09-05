@@ -26,7 +26,7 @@ export async function POST(req: Request) {
     } = body;
 
     // =========================================================================
-    // 1. ELEVENLABS V3 AUDIO + SFX PREVIEW
+    // 1. ELEVENLABS AUDIO + SFX (Calibrated strictly for < 8s delivery)
     // =========================================================================
     if (onlyAudio) {
       const apiKey = process.env.ELEVENLABS_API_KEY;
@@ -39,10 +39,9 @@ export async function POST(req: Request) {
           ? process.env.MY_CUSTOM_VOICE_ID || "QnyUxHTDyrsvn6iC7qBT"
           : process.env.SARAH_VOICE_ID || "a8ByD1LhCNBSMqQ7xAvI";
 
-      // Pass the text directly with Gemini's embedded ElevenLabs V3 pacing/emotion tags
       const formattedScript = script?.trim() || "";
 
-      console.log("🎙️ Generating ElevenLabs V3 Audio for:", voiceId);
+      console.log("🎙️ Generating Rapid ElevenLabs V3 Audio for:", voiceId);
       const ttsPromise = fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
         method: "POST",
         headers: {
@@ -53,9 +52,10 @@ export async function POST(req: Request) {
           text: formattedScript,
           model_id: "eleven_v3",
           voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.5,
-            style: 0,
+            stability: 0.45,
+            similarity_boost: 0.75,
+            style: 0.2,
+            speed: 1.08, // Slightly faster speaking rate to ensure complete speech within 8s
             use_speaker_boost: true,
           },
         }),
@@ -72,7 +72,6 @@ export async function POST(req: Request) {
         sfxPrompt || "Crisp satisfying commercial sound effect, subtle sparkle whoosh";
       const sfxPromise = generateElevenLabsSFX(rawPrompt, 4).catch((err: any) => {
         sfxErrorMessage = err.message || "SFX Generation failed";
-        console.error("⚠️ SFX Generation Warning:", sfxErrorMessage);
         return null;
       });
 
@@ -125,8 +124,8 @@ export async function POST(req: Request) {
 
     const voiceDirection =
       voice === "sarah"
-        ? "VOICE GENDER: FEMALE (سارة). Deliver spontaneous, vibrant conversational Algerian Arabic."
-        : "VOICE GENDER: MALE (وليد). Deliver punchy, confident, energetic commercial Algerian Arabic.";
+        ? "VOICE GENDER: FEMALE (سارة). Rapid, highly enthusiastic Algerian Arabic, strictly under 17 words."
+        : "VOICE GENDER: MALE (وليد). Confident, fast-paced commercial Algerian Arabic, strictly under 17 words.";
 
     const promptParts: any[] = [
       LOCKED_SYSTEM_PROMPT,

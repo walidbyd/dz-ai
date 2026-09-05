@@ -23,13 +23,12 @@ export async function generateKlingUGCVideo(
     formattedImageUrl = `data:image/jpeg;base64,${imageUrl}`;
   }
 
-  // Pure dynamic commercial direction without restrictive face-to-camera templates
-  const optimizedPrompt = `${prompt}. Cinematic 9:16 vertical commercial video, dynamic product showcase, commercial studio lighting, smooth professional camera movement`;
+  // Enforce kinetic motion, fast camera sweeping, and light changes to prevent static renders
+  const optimizedPrompt = `${prompt}. Dynamic 9:16 vertical commercial advertisement, fast sweeping camera movement, dramatic lighting change, professional product interaction, highly engaging commercial b-roll, high cinematic motion`;
 
   const negativePrompt =
-    "glitch, video artifacts, digital noise, rendering errors, visual stutter, frame drop, screen tear, compression artifacts, chromatic aberration, flickering, flashing, ghosting, blurry, out of focus, low resolution, pixelated, 3d render look, cartoonish, oversaturated, deformed geometry, warped objects, melting surfaces, morphing shapes, floating detached items, bad anatomy, mutated hands, deformed fingers, extra limbs, severed limbs, unnatural motion, jerky camera movements, abrupt transitions, talking to camera, mouth speaking, moving lips, speech animation, watermark, logo overlay, timestamp, subtitle text, low quality, amateur footage";
+    "static image, frozen frame, still photo, motionless picture, slideshow, camera zoom on still image, lack of movement, glitch, video artifacts, digital noise, rendering errors, visual stutter, frame drop, screen tear, compression artifacts, chromatic aberration, flickering, flashing, ghosting, blurry, out of focus, low resolution, pixelated, 3d render look, cartoonish, deformed geometry, warped objects, melting surfaces, morphing shapes, floating detached items, bad anatomy, mutated hands, deformed fingers, extra limbs, talking to camera, mouth speaking, watermark, logo overlay, timestamp, subtitle text";
 
-  // Updated to '8s' for full 8-second Veo 3.1 generation
   const result = await fal.queue.submit("fal-ai/veo3.1/lite/image-to-video", {
     input: {
       prompt: optimizedPrompt,

@@ -32,6 +32,7 @@ import {
   ShoppingBag,
   Download,
   Flame,
+  Clock,
 } from "lucide-react";
 import Link from "next/link";
 import { BaridiMobModal } from "@/components/BaridiMobModal";
@@ -397,16 +398,9 @@ export default function StudioPage() {
     }
   };
 
+  // Hard-burn Hook, Caption badge, and ElevenLabs audio directly into downloaded MP4
   const handleDownloadMergedVideo = async () => {
     if (!finalVideoUrl) return;
-
-    if (!previewAudioUrl) {
-      const a = document.createElement("a");
-      a.href = finalVideoUrl;
-      a.download = "ugc-ad-dz.mp4";
-      a.click();
-      return;
-    }
 
     setIsExportingVideo(true);
     try {
@@ -415,40 +409,51 @@ export default function StudioPage() {
       videoEl.src = finalVideoUrl;
       videoEl.muted = true;
 
-      const audioEl = document.createElement("audio");
-      audioEl.crossOrigin = "anonymous";
-      audioEl.src = previewAudioUrl;
-
-      await Promise.all([
-        new Promise((res) => (videoEl.onloadedmetadata = res)),
-        new Promise((res) => (audioEl.onloadedmetadata = res)),
-      ]);
-
-      const actx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const dest = actx.createMediaStreamDestination();
-
-      const sourceAudio = actx.createMediaElementSource(audioEl);
-      sourceAudio.connect(dest);
+      let audioEl: HTMLAudioElement | null = null;
+      if (previewAudioUrl) {
+        audioEl = document.createElement("audio");
+        audioEl.crossOrigin = "anonymous";
+        audioEl.src = previewAudioUrl;
+      }
 
       let sfxEl: HTMLAudioElement | null = null;
       if (previewSfxUrl) {
         sfxEl = document.createElement("audio");
         sfxEl.crossOrigin = "anonymous";
         sfxEl.src = previewSfxUrl;
-        await new Promise((res) => (sfxEl!.onloadedmetadata = res));
+      }
+
+      const mediaPromises: Promise<any>[] = [
+        new Promise((res) => (videoEl.onloadedmetadata = res)),
+      ];
+      if (audioEl) mediaPromises.push(new Promise((res) => (audioEl!.onloadedmetadata = res)));
+      if (sfxEl) mediaPromises.push(new Promise((res) => (sfxEl!.onloadedmetadata = res)));
+      await Promise.all(mediaPromises);
+
+      const actx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const dest = actx.createMediaStreamDestination();
+
+      if (audioEl) {
+        const sourceAudio = actx.createMediaElementSource(audioEl);
+        sourceAudio.connect(dest);
+      }
+      if (sfxEl) {
         const sourceSfxNode = actx.createMediaElementSource(sfxEl);
         sourceSfxNode.connect(dest);
       }
 
       const canvas = document.createElement("canvas");
-      canvas.width = videoEl.videoWidth || 720;
-      canvas.height = videoEl.videoHeight || 1280;
+      const width = videoEl.videoWidth || 720;
+      const height = videoEl.videoHeight || 1280;
+      canvas.width = width;
+      canvas.height = height;
       const ctx = canvas.getContext("2d")!;
 
       const canvasStream = canvas.captureStream(30);
+      const audioTracks = dest.stream.getAudioTracks();
       const combinedStream = new MediaStream([
         canvasStream.getVideoTracks()[0],
-        dest.stream.getAudioTracks()[0],
+        ...(audioTracks.length > 0 ? [audioTracks[0]] : []),
       ]);
 
       const mimeType = MediaRecorder.isTypeSupported("video/mp4;codecs=avc1,mp4a.40.2")
@@ -470,7 +475,7 @@ export default function StudioPage() {
         const ext = mimeType.includes("mp4") ? "mp4" : "webm";
         const a = document.createElement("a");
         a.href = downloadUrl;
-        a.download = `ugc-ad-dz-with-audio.${ext}`;
+        a.download = `ugc-ad-dz-with-hook.${ext}`;
         a.click();
         URL.revokeObjectURL(downloadUrl);
         setIsExportingVideo(false);
@@ -478,24 +483,109 @@ export default function StudioPage() {
 
       recorder.start();
       videoEl.play();
-      audioEl.play();
+      audioEl?.play();
       sfxEl?.play();
+
+      const hookText = scriptData?.hook || "";
+      const captionText = scriptData?.onScreenText || "";
+
+      // Helper function to draw rounded rectangles on HTML5 Canvas
+      const roundRect = (
+        c: CanvasRenderingContext2D,
+        x: number,
+        y: number,
+        w: number,
+        h: number,
+        r: number
+      ) => {
+        c.beginPath();
+        c.moveTo(x + r, y);
+        c.lineTo(x + w - r, y);
+        c.quadraticCurveTo(x + w, y, x + w, y + r);
+        c.lineTo(x + w, y + h - r);
+        c.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        c.lineTo(x + r, y + h);
+        c.quadraticCurveTo(x, y + h, x, y + h - r);
+        c.lineTo(x, y + r);
+        c.quadraticCurveTo(x, y, x + r, y);
+        c.closePath();
+      };
 
       const drawLoop = () => {
         if (!videoEl.paused && !videoEl.ended) {
-          ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+          // 1. Draw current video frame
+          ctx.drawImage(videoEl, 0, 0, width, height);
+
+          // 2. Render Hook Badge (active during first 4 seconds)
+          if (hookText && videoEl.currentTime <= 4.0) {
+            ctx.save();
+            const badgeW = width * 0.88;
+            const badgeH = 95;
+            const badgeX = (width - badgeW) / 2;
+            const badgeY = height * 0.11;
+
+            // Outer glowing border
+            const grad = ctx.createLinearGradient(badgeX, badgeY, badgeX + badgeW, badgeY + badgeH);
+            grad.addColorStop(0, "#ef4444");
+            grad.addColorStop(0.5, "#f43f5e");
+            grad.addColorStop(1, "#f59e0b");
+
+            ctx.shadowColor = "rgba(239, 68, 68, 0.75)";
+            ctx.shadowBlur = 24;
+            ctx.fillStyle = grad;
+            roundRect(ctx, badgeX - 3, badgeY - 3, badgeW + 6, badgeH + 6, 26);
+            ctx.fill();
+
+            // Inner dark card container
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = "rgba(0, 0, 0, 0.92)";
+            roundRect(ctx, badgeX, badgeY, badgeW, badgeH, 24);
+            ctx.fill();
+
+            // Hook typography
+            ctx.direction = "rtl";
+            ctx.textAlign = "center";
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "900 32px 'Segoe UI', Tahoma, Arial, sans-serif";
+            ctx.fillText(hookText, width / 2, badgeY + 58);
+            ctx.restore();
+          }
+
+          // 3. Render Bottom On-Screen Caption Badge
+          if (captionText) {
+            ctx.save();
+            const capW = width * 0.75;
+            const capH = 55;
+            const capX = (width - capW) / 2;
+            const capY = height * 0.22;
+
+            ctx.fillStyle = "#facc15";
+            ctx.shadowColor = "rgba(0, 0, 0, 0.6)";
+            ctx.shadowBlur = 14;
+            roundRect(ctx, capX, capY, capW, capH, 28);
+            ctx.fill();
+
+            ctx.direction = "rtl";
+            ctx.textAlign = "center";
+            ctx.fillStyle = "#000000";
+            ctx.font = "900 24px 'Segoe UI', Tahoma, Arial, sans-serif";
+            ctx.fillText(captionText, width / 2, capY + 36);
+            ctx.restore();
+          }
+
           requestAnimationFrame(drawLoop);
         } else if (videoEl.ended) {
           recorder.stop();
           actx.close();
         }
       };
+
       drawLoop();
     } catch (err) {
-      console.warn("Direct merge fallback, downloading direct URL:", err);
+      console.warn("Muxing error, fallback to raw video download:", err);
       const a = document.createElement("a");
       a.href = finalVideoUrl;
-      a.download = "ugc-ad-dz.mp4";
+      a.download = "ugc-ad-dz-8s.mp4";
       a.target = "_blank";
       a.click();
       setIsExportingVideo(false);
@@ -585,7 +675,7 @@ export default function StudioPage() {
             <h1 className="text-xs font-bold text-slate-900 leading-none">
               {userName || "مساعد الإعلانات الذكي"}
             </h1>
-            <span className="text-[10px] text-slate-400 font-medium">Viral UGC Reels 9:16 (8s)</span>
+            <span className="text-[10px] text-slate-400 font-medium">TikTok Reels 8.0s Ad Engine</span>
           </div>
           {userAvatar ? (
             <img src={userAvatar} alt="Profile" className="w-8 h-8 rounded-full border border-emerald-500 object-cover shadow-xs" />
@@ -695,7 +785,7 @@ export default function StudioPage() {
                     <button
                       type="button"
                       onClick={startRecording}
-                      className="w-full min-h-[40px] py-2 px-3 bg-red-600 hover:bg-red-700 active:scale-[0.99] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-xs"
+                      className="w-full min-h-[40px] py-2 px-3 bg-red-600 hover:bg-red-700 active:scale-[0.99] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer"
                     >
                       <Mic className="w-3.5 h-3.5 animate-pulse" />
                       <span>تسجيل مباشر بالميكروفون</span>
@@ -704,7 +794,7 @@ export default function StudioPage() {
                     <button
                       type="button"
                       onClick={stopRecording}
-                      className="w-full min-h-[40px] py-2 px-3 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all animate-pulse shadow-md"
+                      className="w-full min-h-[40px] py-2 px-3 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all animate-pulse shadow-md cursor-pointer"
                     >
                       <Square className="w-3 h-3 fill-red-500 text-red-500" />
                       <span>إيقاف وحفظ ({recordDuration} ثانية)</span>
@@ -769,24 +859,35 @@ export default function StudioPage() {
                 <div className="space-y-3">
                   {scriptData && (
                     <>
+                      {/* Premium Animated Hook Presentation */}
                       {scriptData.hook && (
-                        <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-1">
-                          <div className="flex items-center gap-1.5 text-xs font-black text-amber-700">
-                            <Flame className="w-4 h-4 text-amber-600 fill-amber-500" />
-                            <span>الهوك الافتتاحي (أول ثانيتين لجلب المشاهدات):</span>
+                        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-rose-500/15 border border-amber-500/30 p-3.5 shadow-xs">
+                          <div className="flex items-center justify-between mb-1.5">
+                            <div className="flex items-center gap-1.5 text-xs font-black text-amber-900">
+                              <span className="flex h-2 w-2 rounded-full bg-red-500 animate-ping" />
+                              <Flame className="w-4 h-4 text-orange-600 fill-amber-500" />
+                              <span>الهوك الافتتاحي الفيروسي (أول ثانيتين):</span>
+                            </div>
+                            <span className="text-[10px] bg-orange-600 text-white font-black px-2 py-0.5 rounded-full shadow-xs">
+                              0:00 - 0:02
+                            </span>
                           </div>
-                          <p className="text-xs font-bold text-amber-900 leading-relaxed">{scriptData.hook}</p>
+                          <p className="text-sm font-black text-slate-900 leading-snug">
+                            "{scriptData.hook}"
+                          </p>
                         </div>
                       )}
 
+                      {/* Calibrated 8s Script */}
                       <div className="p-3.5 sm:p-4 rounded-2xl bg-emerald-50/70 border border-emerald-200 space-y-2">
                         <div className="flex items-center justify-between text-[11px] font-bold text-emerald-800">
                           <span className="flex items-center gap-1.5">
                             <Volume2 className="w-3.5 h-3.5 text-emerald-600" />
-                            السكريبت الإعلاني (8 ثوانٍ):
+                            السكريبت الإعلاني المضبوط (8 ثوانٍ فقط):
                           </span>
-                          <span className="text-[10px] bg-white px-2 py-0.5 rounded-full border border-emerald-300 font-semibold">
-                            UGC Viral
+                          <span className="text-[10px] bg-emerald-600 text-white px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            8.0s Max
                           </span>
                         </div>
                         <p className="text-sm font-bold leading-relaxed text-slate-900">{scriptData.script}</p>
@@ -795,7 +896,7 @@ export default function StudioPage() {
                       <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 space-y-1">
                         <span className="text-[11px] font-bold text-slate-600 flex items-center gap-1.5">
                           <Video className="w-3.5 h-3.5 text-slate-500" />
-                          المشهد الإبداعي وحركة المنتج:
+                          المشهد البصري السينمائي:
                         </span>
                         <p className="text-xs text-slate-600 leading-relaxed">{scriptData.visualPromptAr}</p>
                       </div>
@@ -815,12 +916,12 @@ export default function StudioPage() {
                         type="button"
                         disabled={loadingAudio || audioPreviewCount >= 2}
                         onClick={handleGenerateAudio}
-                        className="w-full min-h-[46px] py-3 bg-slate-900 hover:bg-slate-800 active:scale-[0.99] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-xs transition-all disabled:opacity-50"
+                        className="w-full min-h-[46px] py-3 bg-slate-900 hover:bg-slate-800 active:scale-[0.99] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-xs transition-all disabled:opacity-50 cursor-pointer"
                       >
                         {loadingAudio ? (
                           <>
                             <Loader2 className="w-4 h-4 animate-spin" />
-                            <span>جاري توليد ودمج الصوت والمؤثرات...</span>
+                            <span>جاري توليد ودمج الصوت والمؤثرات (8s)...</span>
                           </>
                         ) : (
                           <>
@@ -842,7 +943,7 @@ export default function StudioPage() {
                             type="button"
                             onClick={handleGenerateAudio}
                             disabled={loadingAudio}
-                            className="text-[10px] text-emerald-700 underline hover:text-emerald-900 font-bold"
+                            className="text-[10px] text-emerald-700 underline hover:text-emerald-900 font-bold cursor-pointer"
                           >
                             إعادة توليد (متبقي 1)
                           </button>
@@ -853,7 +954,7 @@ export default function StudioPage() {
                         <button
                           type="button"
                           onClick={playMixedAudio}
-                          className="w-full min-h-[44px] py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-xs transition-all"
+                          className="w-full min-h-[44px] py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
                         >
                           {isPlayingAudio ? (
                             <>
@@ -875,7 +976,7 @@ export default function StudioPage() {
                     type="button"
                     disabled={isRendering || !previewAudioUrl}
                     onClick={handleRenderFinalVideo}
-                    className="w-full min-h-[48px] py-3.5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
+                    className="w-full min-h-[48px] py-3.5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 cursor-pointer"
                   >
                     {isRendering ? (
                       <>
@@ -895,9 +996,9 @@ export default function StudioPage() {
                   <div className="w-12 h-12 rounded-full bg-slate-50 flex items-center justify-center text-slate-300">
                     <Sparkles className="w-6 h-6" />
                   </div>
-                  <p className="text-xs font-bold text-slate-600">صانع الإعلانات الإبداعية جاهز</p>
+                  <p className="text-xs font-bold text-slate-600">محرك إعلانات 8 ثوانٍ الفيروسي</p>
                   <p className="text-[11px] text-slate-400 max-w-xs">
-                    ارفع صور السلعة، واكتب تفاصيل العرض بالأسفل لإنشاء أقوى هوك وسيناريو إعلاني تيك توك.
+                    ارفع صور السلعة، واكتب تفاصيل العرض بالأسفل لإنشاء سكريبت وهوك إعلاني محسوب بدقة 8 ثوانٍ.
                   </p>
                 </div>
               )}
@@ -920,7 +1021,7 @@ export default function StudioPage() {
                 type="button"
                 disabled={loadingScript}
                 onClick={() => handleGenerateScript()}
-                className="w-10 h-10 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl flex items-center justify-center disabled:opacity-50 shrink-0 shadow-xs"
+                className="w-10 h-10 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl flex items-center justify-center disabled:opacity-50 shrink-0 shadow-xs cursor-pointer"
               >
                 {loadingScript ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4 rotate-180" />}
               </button>
@@ -965,7 +1066,6 @@ export default function StudioPage() {
                     className="w-full h-full object-cover"
                   />
 
-                  {/* Tap-to-Play overlay unlocking audio */}
                   {!isPlayingAudio && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/40 z-30 transition-opacity">
                       <div className="w-14 h-14 rounded-full bg-emerald-600/90 text-white flex items-center justify-center shadow-lg border border-white/20">
@@ -993,17 +1093,33 @@ export default function StudioPage() {
                 </div>
               )}
 
+              {/* Dynamic Animated Hook Badge on Phone Preview */}
+              {scriptData?.hook && (
+                <div className="absolute top-14 inset-x-2.5 z-20 flex flex-col items-center pointer-events-none">
+                  <div className="relative w-full max-w-[260px] bg-gradient-to-r from-red-600 via-rose-600 to-amber-600 p-[1.5px] rounded-2xl shadow-2xl animate-pulse">
+                    <div className="bg-black/90 backdrop-blur-md px-3 py-1.5 rounded-2xl flex items-center justify-between gap-2 border border-white/10">
+                      <span className="flex h-2 w-2 shrink-0 rounded-full bg-amber-400 animate-ping" />
+                      <span className="text-[11px] font-black text-white text-center leading-tight truncate flex-1 drop-shadow-md">
+                        {scriptData.hook}
+                      </span>
+                      <Flame className="w-4 h-4 text-amber-400 fill-amber-400 shrink-0" />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* On-Screen Caption Badge */}
               {scriptData?.onScreenText && (
-                <div className="absolute top-16 inset-x-3 z-20 flex justify-center pointer-events-none">
-                  <span className="bg-red-600 text-white font-black text-[11px] px-3 py-1 rounded-full shadow-lg border border-white/20 animate-bounce">
+                <div className="absolute top-28 inset-x-3 z-20 flex justify-center pointer-events-none">
+                  <span className="bg-amber-400 text-black font-black text-[10px] px-2.5 py-0.5 rounded-full shadow-lg border border-black/10 uppercase tracking-wide">
                     {scriptData.onScreenText}
                   </span>
                 </div>
               )}
 
               <div className="relative z-20 pt-4 px-3 flex items-center justify-between text-[10px] text-white/90 pointer-events-none">
-                <span className="bg-black/40 backdrop-blur-md px-2 py-0.5 rounded-full font-mono text-[9px]">UGC 8s</span>
-                <span className="bg-emerald-600 text-white font-bold px-2 py-0.5 rounded-full text-[9px]">HD 9:16</span>
+                <span className="bg-black/50 backdrop-blur-md px-2 py-0.5 rounded-full font-mono text-[9px] border border-white/10">8.0s Reel</span>
+                <span className="bg-emerald-600 text-white font-bold px-2 py-0.5 rounded-full text-[9px]">UGC</span>
               </div>
 
               <div className="relative z-20 self-end px-2 flex flex-col items-center gap-3 text-white pb-8 pointer-events-none">
@@ -1040,7 +1156,7 @@ export default function StudioPage() {
             </div>
           </div>
 
-          {/* Merged Video Download Button */}
+          {/* Merged Video Download Button (Hardcoded Hook + Audio) */}
           {finalVideoUrl && (
             <button
               type="button"
@@ -1051,12 +1167,12 @@ export default function StudioPage() {
               {isExportingVideo ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>جاري دمج الصوت وحفظ الفيديو...</span>
+                  <span>جاري حرق الهوك ودمج الصوت (MP4)...</span>
                 </>
               ) : (
                 <>
                   <Download className="w-4 h-4" />
-                  <span>تحميل الفيديو مدمج بالصوت (MP4)</span>
+                  <span>تحميل الفيديو مدمج بالهوك والصوت (MP4)</span>
                 </>
               )}
             </button>
