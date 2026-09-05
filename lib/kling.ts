@@ -1,7 +1,5 @@
 // lib/kling.ts
-
-const SUBMIT_URL = "https://queue.fal.run/fal-ai/veo3.1/lite/image-to-video";
-const QUEUE_BASE_MODEL_ID = "fal-ai/veo3.1/lite";
+import { fal } from "@fal-ai/client";
 
 export async function generateKlingUGCVideo(
   prompt: string,
@@ -12,6 +10,11 @@ export async function generateKlingUGCVideo(
   if (!falKey) {
     throw new Error("Missing FAL_KEY in environment variables");
   }
+
+  // Configure fal credentials
+  fal.config({
+    credentials: falKey,
+  });
 
   let formattedImageUrl = imageUrl;
   if (
@@ -31,14 +34,8 @@ export async function generateKlingUGCVideo(
   const negativePrompt =
     "talking, moving lips, speaking mouth, lip-sync, revealing clothes, exposed skin, low cut, unmodest, immodest, cleavage, dirty skin, acne, blemishes, facial distortion, morphing, blurry text, distorted product label, changing logo, bad anatomy, deformed fingers, extra limbs, shaky camera, low resolution, glitch, artifacts, jerky motion";
 
-  const response = await fetch(SUBMIT_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Key ${falKey}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: JSON.stringify({
+  const result = await fal.queue.submit("fal-ai/veo3.1/lite/image-to-video", {
+    input: {
       prompt: optimizedPrompt,
       negative_prompt: negativePrompt,
       image_url: formattedImageUrl,
@@ -46,23 +43,10 @@ export async function generateKlingUGCVideo(
       aspect_ratio: "9:16",
       resolution: "720p",
       generate_audio: false,
-    }),
+    },
   });
 
-  const text = await response.text();
-  let data: any = {};
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch {
-    throw new Error(`fal.ai returned invalid response: ${text.slice(0, 100)}`);
-  }
-
-  if (!response.ok) {
-    const errorMsg = data.detail || data.message || text;
-    throw new Error(`fal.ai Veo Error (${response.status}): ${errorMsg}`);
-  }
-
-  return data.request_id;
+  return result.request_id;
 }
 
 export async function checkKlingTaskStatus(
@@ -78,86 +62,49 @@ export async function checkKlingTaskStatus(
     throw new Error("Missing FAL_KEY in environment variables");
   }
 
-  // FULL endpoint ID is mandatory
-  const MODEL_ID = "fal-ai/veo3.1/lite/image-to-video";
-
-  const statusUrl = `https://queue.fal.run/${MODEL_ID}/requests/${taskId}/status`;
-
-  const response = await fetch(statusUrl, {
-    method: "GET",
-    headers: {
-      Authorization: `Key ${falKey}`,
-      Accept: "application/json",
-    },
+  fal.config({
+    credentials: falKey,
   });
 
-  const statusText = await response.text();
-  let statusData: any = {};
   try {
-    statusData = statusText ? JSON.parse(statusText) : {};
-  } catch {
-    return { status: "processing" };
-  }
-
-  if (!response.ok) {
-    return {
-      status: "failed",
-      error: statusData.detail || `Status check returned HTTP ${response.status}`,
-    };
-  }
-
-  if (statusData.status === "COMPLETED") {
-    const directUrl =
-      statusData.video?.url ||
-      statusData.output?.video?.url ||
-      statusData.output?.url ||
-      statusData.video_url;
-
-    if (directUrl) {
-      return { status: "succeed", videoUrl: directUrl };
-    }
-
-    // Fetch the actual result
-    const resultUrl = `https://queue.fal.run/${MODEL_ID}/requests/${taskId}`;
-    const resResponse = await fetch(resultUrl, {
-      method: "GET",
-      headers: {
-        Authorization: `Key ${falKey}`,
-        Accept: "application/json",
-      },
+    const status = await fal.queue.status("fal-ai/veo3.1/lite/image-to-video", {
+      requestId: taskId,
+      logs: false,
     });
 
-    const resText = await resResponse.text();
-    let resData: any = {};
-    try {
-      resData = resText ? JSON.parse(resText) : {};
-    } catch {
-      return { status: "failed", error: "Failed to parse fal result payload" };
+    if (status.status === "COMPLETED") {
+      const result: any = await fal.queue.result("fal-ai/veo3.1/lite/image-to-video", {
+        requestId: taskId,
+      });
+
+      const videoUrl =
+        result.data?.video?.url ||
+        result.data?.output?.video?.url ||
+        result.data?.output?.url ||
+        result.video?.url ||
+        result.data?.video_url;
+
+      if (videoUrl) {
+        return { status: "succeed", videoUrl };
+      }
+
+      return { status: "failed", error: "Video URL not found in fal.ai output" };
     }
 
-    const videoUrl =
-      resData.video?.url ||
-      resData.output?.video?.url ||
-      resData.output?.url ||
-      resData.video_url;
-
-    if (videoUrl) {
-      return { status: "succeed", videoUrl };
+    if (status.status === "IN_PROGRESS") {
+      return { status: "processing" };
     }
 
-    return { status: "failed", error: "Video URL not found in completed result" };
-  }
+    if (status.status === "IN_QUEUE") {
+      return { status: "submitted" };
+    }
 
-  if (statusData.status === "IN_PROGRESS") {
-    return { status: "processing" };
+    return { status: "failed", error: "Generation failed on fal.ai" };
+  } catch (error: any) {
+    console.error("fal client error:", error);
+    return {
+      status: "failed",
+      error: error.message || "Failed to check status",
+    };
   }
-
-  if (statusData.status === "IN_QUEUE") {
-    return { status: "submitted" };
-  }
-
-  return {
-    status: "failed",
-    error: statusData.error || statusData.detail || "Generation failed on fal.ai",
-  };
 }
